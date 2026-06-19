@@ -1,0 +1,407 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== helpers =====
+    function isSignedIn() { return request.auth != null; }
+    function self(uid) { return request.auth.uid == uid; }
+    function emailMatches(e) {
+      return isSignedIn() && request.auth.token.email.lower() == e.lower();
+    }
+    function bootstrapEmail() { return "goten8615xd@gmail.com"; }
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+    function myRole() { return userDoc(request.auth.uid).role; }
+    function myYear() { return userDoc(request.auth.uid).year; }
+    function isTopAdmin() { return isSignedIn() && myRole() == "top_admin"; }
+    function isAdminTeacher() { return isSignedIn() && myRole() == "admin_teacher"; }
+    function isAdminStudent() { return isSignedIn() && myRole() == "admin_student"; }
+    // legacy "admin" role - treat as admin_teacher equivalent during migration
+    function isAnyAdmin() {
+      return isSignedIn() && myRole() in ["admin_teacher", "admin_student", "admin", "top_admin"];
+    }
+    function isAdminLevel() {
+      return isSignedIn() && myRole() in ["admin_teacher", "admin", "top_admin"];
+    }
+    function cfg() {
+      return get(/databases/$(database)/documents/config/global).data;
+    }
+
+    // ===== users =====
+    match /users/{uid} {
+      allow get: if isSignedIn() && (
+        self(uid) || isTopAdmin() ||
+        (isAnyAdmin() && resource.data.year == myYear())
+      );
+      allow list: if isSignedIn();
+
+      // create — register ครั้งแรก
+      // - role = "student" ปกติ
+      // - bootstrap email สามารถ create ตัวเองเป็น top_admin
+      allow create: if self(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && (
+          request.resource.data.role == "student"
+          || (request.resource.data.role == "top_admin" && emailMatches(bootstrapEmail()))
+        );
+
+      allow update: if isSignedIn() && (
+        // case 1: self update profile (อนุญาตเปลี่ยน year ตอน register)
+        (self(uid)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role == resource.data.role
+          && (request.resource.data.get("isTester", false) == resource.data.get("isTester", false))
+          && request.resource.data.year is int
+          && request.resource.data.year >= 0
+          && request.resource.data.year <= 5)
+        ||
+        // case 2: top_admin เปลี่ยน role / year / isTester / profile ของคนอื่น
+        (isTopAdmin()
+          && !self(uid)
+          && (resource.data.email.lower() != bootstrapEmail().lower()
+              || (request.resource.data.role == "top_admin"))
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role in ["student", "admin_student", "admin_teacher", "admin", "top_admin"]
+          && request.resource.data.year is int
+          && request.resource.data.year >= 0
+          && request.resource.data.year <= 5)
+        ||
+        // case 3: admin_teacher แก้ profile นักเรียนในชั้นปีตัวเองได้ (ห้ามแตะ role / isTester)
+        (isAdminTeacher()
+          && !self(uid)
+          && resource.data.year == myYear()
+          && resource.data.role == "student"
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.role == resource.data.role
+          && (request.resource.data.get("isTester", false) == resource.data.get("isTester", false))
+          && request.resource.data.year is int
+          && request.resource.data.year >= 1
+          && request.resource.data.year <= 5)
+      );
+
+      // delete — top_admin ทุกคน, admin_teacher ลบ student ในชั้นปีตัวเอง
+      allow delete: if isSignedIn()
+        && !self(uid)
+        && resource.data.email.lower() != bootstrapEmail().lower()
+        && (
+          isTopAdmin()
+          || (isAdminTeacher() && resource.data.role == "student"
+              && resource.data.year == myYear())
+        );
+    }
+
+    // ===== users/{uid}/dailyCheckins/{YYYY-MM-DD} =====
+    match /users/{uid}/dailyCheckins/{date} {
+      allow read: if isSignedIn() && (self(uid) || isAnyAdmin());
+
+      function isTester() {
+        return userDoc(uid).get("isTester", false) == true;
+      }
+
+      allow create: if self(uid)
+        && request.resource.data.count == 1;
+
+      // เช็คอิน/เช็คเอาท์ — สูงสุด 2 ครั้ง/วัน (เริ่ม + จบ)
+      allow update: if self(uid)
+        && request.resource.data.count == resource.data.count + 1
+        && (isTester() || request.resource.data.count <= 2);
+
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== config/global =====
+    match /config/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isTopAdmin() || emailMatches(bootstrapEmail());
+      allow update, delete: if isTopAdmin();
+    }
+
+    // ===== checkins =====
+    match /checkins/{checkinId} {
+      allow get: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isTopAdmin() ||
+        (isAnyAdmin() && resource.data.year == myYear())
+      );
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasAll([
+          "id", "userId", "fullName", "nickname", "classroom", "year",
+          "studentId", "timestamp", "location", "accuracy",
+          "distanceMeters", "mapLink", "slotId", "locationId", "method"
+        ])
+        && request.resource.data.method in ["gps", "emergency_code", "tester"]
+        && request.resource.data.timestamp >= request.time.toMillis() - 60000
+        && request.resource.data.timestamp <= request.time.toMillis() + 60000;
+
+      allow update: if false;
+      allow delete: if isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear());
+    }
+
+    // ===== emergencyCodes/{code} — รหัสเช็คอินฉุกเฉิน =====
+    match /emergencyCodes/{code} {
+      allow get: if isSignedIn();
+      allow list: if isAnyAdmin();
+
+      // สร้างได้: top_admin + admin_teacher (admin_student ห้ามสร้าง)
+      allow create: if (isTopAdmin() || isAdminTeacher() || isAdminLevel())
+        && request.resource.data.code == code
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.used == false
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000;
+
+      allow update: if isSignedIn()
+        && resource.data.used == false
+        && request.resource.data.used == true
+        && request.resource.data.usedBy == request.auth.uid
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.year == resource.data.year
+        && request.time.toMillis() <= resource.data.expiresAt;
+
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== inviteCodes/{code} — รหัส login ตอน register (ใช้ได้หลายคนจนกว่าจะหมดเวลา) =====
+    match /inviteCodes/{code} {
+      allow get: if isSignedIn();
+      allow list: if isAnyAdmin();
+
+      // top_admin สร้างได้ทุกชั้นปี (year=null), admin_teacher สร้างได้เฉพาะชั้นปีตัวเอง
+      allow create: if isSignedIn()
+        && request.resource.data.code == code
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000
+        && (
+          isTopAdmin()
+          || (isAdminTeacher()
+              && request.resource.data.year == myYear()
+              && request.resource.data.year != null)
+        );
+
+      // ใช้ซ้ำได้ — ไม่ต้อง mark used
+      allow update: if false;
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== tasks/{taskId} — งานนักศึกษาวิชาทหาร แยกตามชั้นปี =====
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+
+      // create/update — admin_student ในชั้นปีเดียวกัน หรือ admin_teacher / top_admin
+      allow create: if isSignedIn()
+        && request.resource.data.id == taskId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.year is int
+        && request.resource.data.year >= 1
+        && request.resource.data.year <= 5
+        && (
+          isTopAdmin()
+          || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
+              && request.resource.data.year == myYear())
+        );
+
+      allow update: if isSignedIn()
+        && request.resource.data.year == resource.data.year
+        && (
+          isTopAdmin()
+          || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
+              && resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
+            && resource.data.year == myYear());
+    }
+
+    // ===== taskCompletions/{completionId} — การติ๊กว่านักเรียนทำงานนี้แล้ว =====
+    match /taskCompletions/{completionId} {
+      allow read: if isSignedIn();
+
+      // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin
+      allow create: if isSignedIn()
+        && request.resource.data.id == completionId
+        && request.resource.data.checkedBy == request.auth.uid
+        && (
+          isTopAdmin()
+          || (isAnyAdmin() && request.resource.data.year == myYear())
+        );
+
+      allow update: if isSignedIn()
+        && request.resource.data.checkedBy == request.auth.uid
+        && request.resource.data.taskId == resource.data.taskId
+        && request.resource.data.studentUid == resource.data.studentUid
+        && request.resource.data.year == resource.data.year
+        && (
+          isTopAdmin()
+          || (isAnyAdmin() && resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear());
+    }
+
+    // ===== yearConfigs/{yearN} — เกณฑ์ผ่าน % ต่อชั้นปี (admin_teacher ตั้ง) =====
+    match /yearConfigs/{yearId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isSignedIn()
+        && request.resource.data.year is int
+        && request.resource.data.passingPercent is int
+        && request.resource.data.passingPercent >= 0
+        && request.resource.data.passingPercent <= 100
+        && (
+          isTopAdmin()
+          || (isAdminTeacher() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== pendingStudents/{studentId} — ข้อมูลที่ admin pre-create ก่อน register =====
+    match /pendingStudents/{studentId} {
+      // อ่านได้ทุกคนที่ login — ใช้ระหว่าง register
+      allow read: if isSignedIn();
+
+      // create/update — admin_teacher (ในชั้นปีตัวเอง) + top_admin
+      allow create, update: if isSignedIn()
+        && request.resource.data.studentId == studentId
+        && request.resource.data.year is int
+        && request.resource.data.year >= 1
+        && request.resource.data.year <= 5
+        && request.resource.data.createdBy == request.auth.uid
+        && (
+          isTopAdmin()
+          || (isAdminTeacher() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAdminTeacher() && resource.data.year == myYear());
+    }
+
+    // ===== groups/{groupId} — กลุ่มจราจร (ตั้งชื่อแค่ตัวเลข, มี checkbox) =====
+    match /groups/{groupId} {
+      // student อ่านได้ — เพื่อดูว่าตัวเองอยู่กลุ่มไหน
+      allow read: if isSignedIn();
+
+      // create + update ทุก field — admin_teacher + top_admin
+      allow create: if (isAdminTeacher() || isTopAdmin())
+        && request.resource.data.id == groupId
+        && request.resource.data.number is int
+        && request.resource.data.number >= 1
+        && request.resource.data.year is int
+        && request.resource.data.memberUids is list
+        && request.resource.data.members is list;
+
+      allow update: if (isAdminTeacher() || isTopAdmin())
+        && request.resource.data.id == groupId
+        && request.resource.data.number is int
+        && request.resource.data.number >= 1
+        && request.resource.data.year is int
+        && request.resource.data.memberUids is list
+        && request.resource.data.members is list;
+
+      // admin_student เช็คได้ทุกกลุ่ม — เฉพาะ field เช็ค (ไม่ให้แก้รายชื่อสมาชิก)
+      allow update: if isAdminStudent()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+             ["checkStatus", "checkedBy", "checkedByName", "checkedAt", "updatedAt"]
+           );
+
+      allow delete: if isAdminTeacher() || isTopAdmin();
+    }
+
+    // ===== swapRequests/{requestId} — คำขอสลับเวร =====
+    match /swapRequests/{requestId} {
+      allow read: if isSignedIn();
+
+      // student create — ตัวเองเป็นคนขอ + status = pending
+      allow create: if isSignedIn()
+        && request.resource.data.id == requestId
+        && request.resource.data.requestedBy == request.auth.uid
+        && request.resource.data.status == "pending";
+
+      // update — เฉพาะ admin_teacher / top_admin (อนุมัติ/ปฏิเสธ)
+      // หรือเจ้าของขอยกเลิก (เปลี่ยน status เป็น "rejected" ของตัวเอง)
+      allow update: if isSignedIn() && (
+        isAdminTeacher() || isTopAdmin()
+        || (resource.data.requestedBy == request.auth.uid
+            && resource.data.status == "pending"
+            && request.resource.data.status == "rejected")
+      );
+
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== activityLogs/{logId} — บันทึกการกระทำทั้งหมด (checkin, เวร, tasks, role change) =====
+    match /activityLogs/{logId} {
+      // อ่าน — admin อ่านของชั้นปีตัวเอง, top_admin อ่านทั้งหมด
+      allow get: if isSignedIn() && (
+        isTopAdmin()
+        || (isAnyAdmin() && (!("year" in resource.data) || resource.data.year == myYear()))
+      );
+      allow list: if isAnyAdmin();
+
+      // create — ทุกคนที่ login เขียนได้ (log การกระทำตัวเอง)
+      allow create: if isSignedIn()
+        && request.resource.data.id == logId
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.timestamp >= request.time.toMillis() - 5000
+        && request.resource.data.timestamp <= request.time.toMillis() + 5000
+        && request.resource.data.type in [
+          "checkin", "duty_session", "task_check", "task_create", "task_update", "task_delete",
+          "swap_request", "swap_approve", "swap_reject",
+          "group_create", "group_update", "group_delete",
+          "role_change", "delete_user", "config_change"
+        ];
+
+      allow update: if false;
+      // delete — top_admin ลบได้ (cleanup เก่ากว่า 90 วัน)
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== dutyLogs/{dayKey_groupId} — ประวัติเวรรายวัน (กลุ่มไหนเข้าเวรวันไหน) =====
+    match /dutyLogs/{logId} {
+      allow read: if isSignedIn();
+
+      // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin (สร้างตอนติ๊กกลุ่ม)
+      allow create, update: if isSignedIn()
+        && request.resource.data.id == logId
+        && request.resource.data.year is int
+        && (
+          isTopAdmin()
+          || (isAnyAdmin() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear());
+    }
+
+    // ===== attendanceExemptions/{dayKey_uid} — ยกเว้นการขาด (นับเป็นมาแทน) =====
+    match /attendanceExemptions/{exemptionId} {      allow read: if isSignedIn();
+
+      // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin
+      allow create, update: if isSignedIn()
+        && request.resource.data.id == exemptionId
+        && request.resource.data.exemptedBy == request.auth.uid
+        && request.resource.data.year is int
+        && (
+          isTopAdmin()
+          || (isAnyAdmin() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear());
+    }
+  }
+}

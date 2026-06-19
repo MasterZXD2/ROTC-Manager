@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --primary: 142 71% 35%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 142 71% 35%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Neutral Zinc — feel แบบ GitHub / Vercel */
+    --background: 240 6% 6%;        /* #0E0E10 */
+    --foreground: 240 5% 96%;       /* #F4F4F5 */
+    --card: 240 5% 10%;             /* #18181B */
+    --card-foreground: 240 5% 96%;
+    --primary: 158 64% 52%;         /* #34D399 emerald-400 */
+    --primary-foreground: 240 6% 6%;
+    --secondary: 240 4% 14%;        /* #232327 */
+    --secondary-foreground: 240 5% 96%;
+    --muted: 240 4% 14%;
+    --muted-foreground: 240 4% 63%; /* #A1A1AA zinc-400 */
+    --accent: 240 4% 16%;
+    --accent-foreground: 240 5% 96%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 240 5% 96%;
+    --border: 240 4% 18%;           /* #2C2C30 */
+    --input: 240 4% 18%;
+    --ring: 158 64% 52%;
+  }
+
+  html, body { height: 100%; }
+  body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+
+  /* fix Leaflet inside Tailwind preflight */
+  .leaflet-container { font-family: inherit; }
+
+  /* Leaflet tile colors look better on dark mode */
+  .dark .leaflet-tile {
+    filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+  }
+  .dark .leaflet-control-attribution {
+    background: hsl(var(--card)) !important;
+    color: hsl(var(--muted-foreground)) !important;
+  }
+}
