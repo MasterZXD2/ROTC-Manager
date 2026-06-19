@@ -1149,3 +1149,262 @@ export async function cancelSwapRequest(
   if (cur.status !== "pending") throw new Error("ยกเลิกได้เฉพาะคำขอที่รออนุมัติ");
   await setDoc(ref, { ...cur, status: "rejected", decidedAt: Date.now() });
 }
+
+/* ========== Activity Check-in System ========== */
+
+export async function createActivity(
+  callerUid: string,
+  data: {
+    name: string;
+    year: number;
+    type: "normal" | "external";
+    locations: Array<{ id: string; name: string; lat: number; lng: number }>;
+    radiusMeters: number;
+  },
+): Promise<string> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const isTop = caller.role === "top_admin";
+  if (!isTop && data.year !== caller.year)
+    throw new Error("แก้ได้เฉพาะชั้นปีตัวเอง");
+
+  const ref = doc(collection(db(), "activities"));
+  await setDoc(ref, {
+    id: ref.id,
+    name: data.name,
+    year: data.year,
+    type: data.type,
+    locations: data.locations,
+    radiusMeters: data.radiusMeters,
+    isOpen: false,
+    createdBy: caller.uid,
+    createdByName: caller.fullName || caller.email,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  return ref.id;
+}
+
+export async function updateActivity(
+  callerUid: string,
+  activityId: string,
+  patch: {
+    name?: string;
+    type?: "normal" | "external";
+    locations?: Array<{ id: string; name: string; lat: number; lng: number }>;
+    radiusMeters?: number;
+  },
+): Promise<void> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const ref = doc(db(), "activities", activityId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const cur = snap.data() as any;
+
+  const isTop = caller.role === "top_admin";
+  if (!isTop && cur.year !== caller.year)
+    throw new Error("แก้ได้เฉพาะชั้นปีตัวเอง");
+
+  await setDoc(ref, { ...cur, ...patch, updatedAt: Date.now() });
+}
+
+export async function deleteActivity(
+  callerUid: string,
+  activityId: string,
+): Promise<void> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const ref = doc(db(), "activities", activityId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const cur = snap.data() as any;
+
+  const isTop = caller.role === "top_admin";
+  if (!isTop && cur.year !== caller.year)
+    throw new Error("ลบได้เฉพาะชั้นปีตัวเอง");
+
+  await deleteDoc(ref);
+}
+
+export async function toggleActivityOpen(
+  callerUid: string,
+  activityId: string,
+  isOpen: boolean,
+): Promise<void> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const ref = doc(db(), "activities", activityId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const cur = snap.data() as any;
+
+  const isTop = caller.role === "top_admin";
+  if (!isTop && cur.year !== caller.year)
+    throw new Error("แก้ได้เฉพาะชั้นปีตัวเอง");
+
+  await setDoc(ref, { ...cur, isOpen, updatedAt: Date.now() });
+}
+
+export async function submitActivityCheckin(
+  uid: string,
+  activityId: string,
+  pos: { lat: number; lng: number },
+  accuracy: number,
+): Promise<void> {
+  const [profile, activitySnap] = await Promise.all([
+    loadProfile(uid),
+    getDoc(doc(db(), "activities", activityId)),
+  ]);
+  if (!activitySnap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const activity = activitySnap.data() as any;
+
+  if (!activity.isOpen) throw new Error("กิจกรรมนี้ยังไม่เปิดให้เช็คอิน");
+
+  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง
+  const existingQ = query(
+    collection(db(), "activityCheckins"),
+    where("activityId", "==", activityId),
+    where("userId", "==", uid),
+    limit(1),
+  );
+  const snap = await getDocs(existingQ);
+  if (!snap.empty) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+
+  // หาจุดใกล้สุด
+  let best: { loc: any; dist: number } | null = null;
+  for (const loc of activity.locations) {
+    const d = distanceMeters(pos, loc);
+    if (!best || d < best.dist) best = { loc, dist: d };
+  }
+  if (!best) throw new Error("ไม่พบจุดเช็คอิน");
+  if (best.dist > activity.radiusMeters)
+    throw new Error(`คุณอยู่ห่างจากจุดเช็คอิน ${best.dist.toFixed(0)} เมตร (อนุญาตไม่เกิน ${activity.radiusMeters} ม.)`);
+
+  const ref = doc(collection(db(), "activityCheckins"));
+  await setDoc(ref, {
+    id: ref.id,
+    activityId,
+    activityName: activity.name,
+    userId: uid,
+    fullName: profile.fullName,
+    nickname: profile.nickname,
+    classroom: profile.classroom,
+    year: profile.year,
+    studentId: profile.studentId,
+    timestamp: Date.now(),
+    location: pos,
+    accuracy,
+    distanceMeters: best.dist,
+    mapLink: googleMapsLink(pos.lat, pos.lng),
+    locationId: best.loc.id,
+    method: "gps",
+  });
+}
+
+export async function submitActivityEmergencyCheckin(
+  uid: string,
+  code: string,
+): Promise<void> {
+  const profile = await loadProfile(uid);
+  const codeRef = doc(db(), "activityEmergencyCodes", code);
+  const codeSnap = await getDoc(codeRef);
+  if (!codeSnap.exists()) throw new Error("รหัสไม่ถูกต้อง");
+  const codeData = codeSnap.data() as any;
+
+  if (codeData.used) throw new Error("รหัสนี้ถูกใช้ไปแล้ว");
+  if (Date.now() > codeData.expiresAt) throw new Error("รหัสหมดอายุแล้ว");
+
+  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง
+  const existingQ = query(
+    collection(db(), "activityCheckins"),
+    where("activityId", "==", codeData.activityId),
+    where("userId", "==", uid),
+    limit(1),
+  );
+  const snap = await getDocs(existingQ);
+  if (!snap.empty) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+
+  const checkinRef = doc(collection(db(), "activityCheckins"));
+  await setDoc(checkinRef, {
+    id: checkinRef.id,
+    activityId: codeData.activityId,
+    activityName: codeData.activityName,
+    userId: uid,
+    fullName: profile.fullName,
+    nickname: profile.nickname,
+    classroom: profile.classroom,
+    year: profile.year,
+    studentId: profile.studentId,
+    timestamp: Date.now(),
+    location: { lat: 0, lng: 0 },
+    accuracy: 0,
+    distanceMeters: -1,
+    mapLink: "",
+    locationId: "",
+    method: "emergency_code",
+  });
+
+  await setDoc(codeRef, {
+    ...codeData,
+    used: true,
+    usedBy: uid,
+    usedAt: Date.now(),
+  });
+}
+
+export async function createActivityEmergencyCode(
+  callerUid: string,
+  activityId: string,
+): Promise<string> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const activitySnap = await getDoc(doc(db(), "activities", activityId));
+  if (!activitySnap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const activity = activitySnap.data() as any;
+
+  const code = genCode();
+  await setDoc(doc(db(), "activityEmergencyCodes", code), {
+    code,
+    activityId,
+    activityName: activity.name,
+    createdBy: caller.uid,
+    createdByName: caller.fullName || caller.email,
+    year: activity.year,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    used: false,
+  });
+  return code;
+}
+
+export async function exemptActivityAttendance(
+  callerUid: string,
+  data: { activityId: string; studentUid: string; reason?: string },
+): Promise<void> {
+  await ensureAdminLevel(callerUid);
+  const caller = await loadProfile(callerUid);
+  const activitySnap = await getDoc(doc(db(), "activities", data.activityId));
+  if (!activitySnap.exists()) throw new Error("ไม่พบกิจกรรม");
+  const activity = activitySnap.data() as any;
+
+  const exemptId = `${data.activityId}_${data.studentUid}`;
+  await setDoc(doc(db(), "activityExemptions", exemptId), {
+    id: exemptId,
+    activityId: data.activityId,
+    studentUid: data.studentUid,
+    year: activity.year,
+    reason: data.reason ?? "",
+    exemptedBy: caller.uid,
+    exemptedByName: caller.fullName || caller.email,
+    exemptedAt: Date.now(),
+  });
+}
+
+export async function unexemptActivityAttendance(
+  callerUid: string,
+  data: { activityId: string; studentUid: string },
+): Promise<void> {
+  await ensureAdminLevel(callerUid);
+  const exemptId = `${data.activityId}_${data.studentUid}`;
+  await deleteDoc(doc(db(), "activityExemptions", exemptId));
+}

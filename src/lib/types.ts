@@ -233,3 +233,71 @@ export interface SwapRequestDoc {
   decisionNote?: string;
   createdAt: number;
 }
+
+/* ========== Activity Check-in System ========== */
+
+/** กิจกรรม — admin สร้าง เปิด/ปิด ให้นักเรียนเช็คอิน */
+export interface ActivityDoc {
+  id: string;
+  name: string;                    // ชื่อกิจกรรม
+  year: number;                    // ชั้นปี
+  type: "normal" | "external";     // ประเภท: ทั่วไป | ข้างนอก
+  locations: Array<{               // จุดเช็คอิน (หลายจุดได้)
+    id: string;
+    name: string;
+    lat: number;
+    lng: number;
+  }>;
+  radiusMeters: number;            // ระยะเช็คอินต่อกิจกรรม
+  isOpen: boolean;                 // สวิตช์ เปิด/ปิด
+  createdBy: string;
+  createdByName: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** การเช็คอินกิจกรรม — นักเรียนเช็คอินได้ 1 ครั้งต่อกิจกรรม */
+export interface ActivityCheckinDoc {
+  id: string;
+  activityId: string;
+  activityName: string;
+  userId: string;
+  fullName: string;
+  nickname: string;
+  classroom: string;
+  year: number;
+  studentId: string;
+  timestamp: number;
+  location: { lat: number; lng: number };
+  accuracy: number;
+  distanceMeters: number;
+  mapLink: string;
+  locationId: string;              // จุดไหนที่เช็คอิน
+  method: "gps" | "emergency_code";
+}
+
+/** รหัสฉุกเฉินสำหรับกิจกรรม — admin สร้างได้หลายรหัส */
+export interface ActivityEmergencyCodeDoc {
+  code: string;
+  activityId: string;
+  activityName: string;
+  createdBy: string;
+  createdByName: string;
+  year: number;
+  expiresAt: number;
+  used: boolean;
+  usedBy?: string;
+  usedAt?: number;
+}
+
+/** ยกเว้นการเช็คอินกิจกรรม — admin กดให้นับว่ามา */
+export interface ActivityExemptionDoc {
+  id: string;                      // `${activityId}_${studentUid}`
+  activityId: string;
+  studentUid: string;
+  year: number;
+  reason?: string;
+  exemptedBy: string;
+  exemptedByName: string;
+  exemptedAt: number;
+}

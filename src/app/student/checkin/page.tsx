@@ -18,6 +18,7 @@ import { submitCheckin, submitCheckinWithCode } from "@/lib/actions";
 import { RequireRole } from "@/components/RequireRole";
 import { StudentBottomNav } from "@/components/StudentBottomNav";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ActivityCheckin } from "@/components/ActivityCheckin";
 import { toast } from "sonner";
 
 const CheckinMap = dynamic(
@@ -34,6 +35,7 @@ function CheckinInner() {
   const [justChecked, setJustChecked] = useState(false);
   const [tick, setTick] = useState(0);
   const [groups, setGroups] = useState<GroupDoc[]>([]);
+  const [checkinType, setCheckinType] = useState<"traffic" | "activity">("traffic");
 
   // re-evaluate time/distance every 10s
   useEffect(() => {
@@ -161,15 +163,32 @@ function CheckinInner() {
         </div>
       </header>
 
-      {!config && (
+      <div className="mb-4 flex gap-2">
+        <Button
+          variant={checkinType === "traffic" ? "default" : "outline"}
+          onClick={() => setCheckinType("traffic")}
+          className="flex-1"
+        >
+          จราจร
+        </Button>
+        <Button
+          variant={checkinType === "activity" ? "default" : "outline"}
+          onClick={() => setCheckinType("activity")}
+          className="flex-1"
+        >
+          กิจกรรม
+        </Button>
+      </div>
+
+      {checkinType === "activity" && userDoc ? (
+        <ActivityCheckin userDoc={userDoc} />
+      ) : !config ? (
         <Card className="mb-4">
           <CardContent className="pt-4 text-sm text-muted-foreground">
             กำลังโหลดการตั้งค่า...
           </CardContent>
         </Card>
-      )}
-
-      {config && (
+      ) : (
         <>
           {!isTester && (
             <Card className={`mb-3 ${duty.isMyTurn ? "border-green-300 bg-green-50" : "border-amber-300 bg-amber-50"}`}>

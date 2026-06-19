@@ -23,6 +23,7 @@ import { AttendanceStats } from "@/components/AttendanceStats";
 import { RosterExportModal } from "@/components/RosterExportModal";
 import { BulkImportModal } from "@/components/BulkImportModal";
 import { AdminGroupsTab } from "@/components/AdminGroupsTab";
+import { AdminActivitiesTab } from "@/components/AdminActivitiesTab";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { downloadXlsx, todayStamp, thaiDateTime } from "@/lib/exports";
 import { toast } from "sonner";
@@ -30,7 +31,7 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import type { UserDoc } from "@/lib/types";
 
 type Range = "today" | "week" | "month";
-type Tab = "checkins" | "users" | "groups" | "tasks";
+type Tab = "checkins" | "users" | "groups" | "tasks" | "activities";
 
 function rangeStart(r: Range): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -146,7 +147,7 @@ function AdminTeacherInner() {
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-5">
         <Button variant={tab === "checkins" ? "default" : "outline"} onClick={() => setTab("checkins")}>
           การเช็คอิน
         </Button>
@@ -155,6 +156,9 @@ function AdminTeacherInner() {
         </Button>
         <Button variant={tab === "groups" ? "default" : "outline"} onClick={() => setTab("groups")}>
           <Users className="mr-1 h-4 w-4" />กลุ่มจราจร
+        </Button>
+        <Button variant={tab === "activities" ? "default" : "outline"} onClick={() => setTab("activities")}>
+          <Calendar className="mr-1 h-4 w-4" />กิจกรรม
         </Button>
         <Button variant={tab === "tasks" ? "default" : "outline"} onClick={() => setTab("tasks")}>
           <ListChecks className="mr-1 h-4 w-4" />งาน
@@ -267,6 +271,10 @@ function AdminTeacherInner() {
           <PassingPercentCard callerUid={userDoc.uid} year={userDoc.year} />
           <TasksPanel callerUid={userDoc.uid} year={userDoc.year} />
         </>
+      )}
+
+      {tab === "activities" && userDoc && (
+        <AdminActivitiesTab userDoc={userDoc} />
       )}
 
       {userDoc && (

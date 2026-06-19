@@ -403,5 +403,82 @@ service cloud.firestore {
       allow delete: if isTopAdmin()
         || (isAnyAdmin() && resource.data.year == myYear());
     }
+
+    // ===== activities/{activityId} — กิจกรรมเช็คอิน =====
+    match /activities/{activityId} {
+      allow read: if isSignedIn();
+
+      allow create: if (isAdminLevel() || isTopAdmin())
+        && request.resource.data.id == activityId
+        && request.resource.data.year is int
+        && request.resource.data.radiusMeters is int
+        && request.resource.data.radiusMeters >= 10
+        && request.resource.data.radiusMeters <= 500
+        && request.resource.data.locations is list
+        && request.resource.data.isOpen is bool
+        && (isTopAdmin() || request.resource.data.year == myYear());
+
+      allow update: if (isAdminLevel() || isTopAdmin())
+        && (isTopAdmin() || resource.data.year == myYear());
+
+      allow delete: if isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear());
+    }
+
+    // ===== activityCheckins/{checkinId} — การเช็คอินกิจกรรม =====
+    match /activityCheckins/{checkinId} {
+      allow get: if isSignedIn() && (
+        resource.data.userId == request.auth.uid
+        || isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear())
+      );
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.timestamp >= request.time.toMillis() - 60000
+        && request.resource.data.timestamp <= request.time.toMillis() + 60000;
+
+      allow delete: if isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear());
+    }
+
+    // ===== activityEmergencyCodes/{code} — รหัสฉุกเฉินกิจกรรม =====
+    match /activityEmergencyCodes/{code} {
+      allow get: if isSignedIn();
+      allow list: if isAnyAdmin();
+
+      allow create: if (isAdminLevel() || isTopAdmin())
+        && request.resource.data.code == code
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.used == false
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000;
+
+      allow update: if isSignedIn()
+        && resource.data.used == false
+        && request.resource.data.used == true
+        && request.resource.data.usedBy == request.auth.uid
+        && request.time.toMillis() <= resource.data.expiresAt;
+
+      allow delete: if isTopAdmin();
+    }
+
+    // ===== activityExemptions/{exemptionId} — ยกเว้นกิจกรรม =====
+    match /activityExemptions/{exemptionId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if (isAdminLevel() || isTopAdmin())
+        && request.resource.data.id == exemptionId
+        && request.resource.data.exemptedBy == request.auth.uid
+        && request.resource.data.year is int
+        && (
+          isTopAdmin()
+          || (isAnyAdmin() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear());
+    }
   }
 }

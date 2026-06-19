@@ -160,6 +160,9 @@ function ConfigInner() {
         <Link href="/top-admin/groups" className="rounded border px-3 py-1">
           กลุ่มจราจร
         </Link>
+        <Link href="/top-admin/activities" className="rounded border px-3 py-1">
+          กิจกรรม
+        </Link>
         <Link href="/top-admin/tasks" className="rounded border px-3 py-1">
           งานทุกชั้นปี
         </Link>
