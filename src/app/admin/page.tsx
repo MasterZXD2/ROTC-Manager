@@ -44,7 +44,7 @@ function AdminInner() {
   const isTeacher = userDoc?.role === "admin_teacher" || userDoc?.role === "admin";
 
   useEffect(() => {
-    if (!userDoc || tab !== "checkins") return;
+    if (!userDoc) return;
     const since = rangeStart(range);
     const q = query(
       collection(db(), "checkins"),
@@ -57,7 +57,7 @@ function AdminInner() {
       setItems(snap.docs.map((d) => d.data() as CheckinDoc)),
     );
     return () => unsub();
-  }, [userDoc, range, tab]);
+  }, [userDoc, range]);
 
   const grouped = useMemo(() => {
     const m = new Map<string, CheckinDoc[]>();

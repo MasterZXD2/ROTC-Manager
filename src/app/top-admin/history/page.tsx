@@ -7,6 +7,7 @@ import { db } from "@/lib/firebase";
 import { RequireRole } from "@/components/RequireRole";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
   Activity, CheckCircle2, Users, Trash2, Settings,
   UserCog, Calendar, ClipboardList, ArrowRightLeft, ChevronLeft
@@ -92,6 +93,33 @@ function ActivityLogPage() {
         </Button>
         <h1 className="text-2xl font-bold">Activity Log</h1>
       </div>
+
+      <nav className="mb-4 flex flex-wrap gap-2 text-sm">
+        <Link href="/top-admin" className="rounded border px-3 py-1">
+          ตั้งค่า
+        </Link>
+        <Link href="/top-admin/admins" className="rounded border px-3 py-1">
+          จัดการแอดมิน
+        </Link>
+        <Link href="/top-admin/users" className="rounded border px-3 py-1">
+          ผู้ใช้ทั้งหมด
+        </Link>
+        <Link href="/top-admin/checkins" className="rounded border px-3 py-1">
+          การเช็คอิน
+        </Link>
+        <Link href="/top-admin/groups" className="rounded border px-3 py-1">
+          กลุ่มจราจร
+        </Link>
+        <Link href="/top-admin/activities" className="rounded border px-3 py-1">
+          กิจกรรม
+        </Link>
+        <Link href="/top-admin/tasks" className="rounded border px-3 py-1">
+          งานทุกชั้นปี
+        </Link>
+        <Link href="/top-admin/history" className="rounded bg-primary px-3 py-1 text-primary-foreground">
+          ประวัติทั้งหมด
+        </Link>
+      </nav>
 
       <div className="mb-4 flex flex-wrap gap-2">
         {(["today", "week", "month"] as const).map((r) => (

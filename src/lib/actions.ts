@@ -1260,16 +1260,12 @@ export async function submitActivityCheckin(
   const activity = activitySnap.data() as any;
 
   if (!activity.isOpen) throw new Error("กิจกรรมนี้ยังไม่เปิดให้เช็คอิน");
+  if (activity.year !== profile.year) throw new Error("กิจกรรมนี้ไม่ใช่ของชั้นปีคุณ");
 
-  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง
-  const existingQ = query(
-    collection(db(), "activityCheckins"),
-    where("activityId", "==", activityId),
-    where("userId", "==", uid),
-    limit(1),
-  );
-  const snap = await getDocs(existingQ);
-  if (!snap.empty) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง (ใช้ doc id แบบ deterministic)
+  const checkinId = `${activityId}_${uid}`;
+  const existingSnap = await getDoc(doc(db(), "activityCheckins", checkinId));
+  if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
 
   // หาจุดใกล้สุด
   let best: { loc: any; dist: number } | null = null;
@@ -1279,11 +1275,10 @@ export async function submitActivityCheckin(
   }
   if (!best) throw new Error("ไม่พบจุดเช็คอิน");
   if (best.dist > activity.radiusMeters)
-    throw new Error(`คุณอยู่ห่างจากจุดเช็คอิน ${best.dist.toFixed(0)} เมตร (อนุญาตไม่เกิน ${activity.radiusMeters} ม.)`);
+    throw new Error(`คุณอยู่ห่างจากจุดเช็คอิน "${best.loc.name}" ${best.dist.toFixed(0)} เมตร (อนุญาตไม่เกิน ${activity.radiusMeters} ม.)`);
 
-  const ref = doc(collection(db(), "activityCheckins"));
-  await setDoc(ref, {
-    id: ref.id,
+  await setDoc(doc(db(), "activityCheckins", checkinId), {
+    id: checkinId,
     activityId,
     activityName: activity.name,
     userId: uid,
@@ -1314,20 +1309,15 @@ export async function submitActivityEmergencyCheckin(
 
   if (codeData.used) throw new Error("รหัสนี้ถูกใช้ไปแล้ว");
   if (Date.now() > codeData.expiresAt) throw new Error("รหัสหมดอายุแล้ว");
+  if (codeData.year !== profile.year) throw new Error("รหัสนี้ไม่ใช่ของชั้นปีคุณ");
 
-  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง
-  const existingQ = query(
-    collection(db(), "activityCheckins"),
-    where("activityId", "==", codeData.activityId),
-    where("userId", "==", uid),
-    limit(1),
-  );
-  const snap = await getDocs(existingQ);
-  if (!snap.empty) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง (ใช้ deterministic ID)
+  const checkinId = `${codeData.activityId}_${uid}`;
+  const existingSnap = await getDoc(doc(db(), "activityCheckins", checkinId));
+  if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
 
-  const checkinRef = doc(collection(db(), "activityCheckins"));
-  await setDoc(checkinRef, {
-    id: checkinRef.id,
+  await setDoc(doc(db(), "activityCheckins", checkinId), {
+    id: checkinId,
     activityId: codeData.activityId,
     activityName: codeData.activityName,
     userId: uid,

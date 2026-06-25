@@ -19,7 +19,7 @@ export interface GpsState {
 const ERROR_MAP: Record<number, { kind: GpsErrorKind; message: string }> = {
   1: {
     kind: "permission_denied",
-    message: "ไม่ได้อนุญาตให้ใช้ตำแหน่ง — เปิดสิทธิ์ในตั้งค่าเบราว์เซอร์",
+    message: "ไม่ได้อนุญาตให้ใช้ตำแหน่ง — เปิดสิทธิ์ในตั้งค่าเบราว์เซอร์ (Safari ต้องใช้ HTTPS)",
   },
   2: {
     kind: "position_unavailable",
@@ -54,6 +54,21 @@ export function useGeolocation(enabled: boolean = true): GpsState {
         accuracy: null,
         lastUpdate: null,
         error: { kind: "unsupported", message: "อุปกรณ์ไม่รองรับ GPS" },
+      });
+      return;
+    }
+
+    // ตรวจสอบ HTTPS (Safari บังคับ)
+    if (typeof window !== "undefined" && window.location.protocol === "http:" && window.location.hostname !== "localhost") {
+      setState({
+        loading: false,
+        position: null,
+        accuracy: null,
+        lastUpdate: null,
+        error: {
+          kind: "permission_denied",
+          message: "Safari ต้องใช้ HTTPS เท่านั้น — ใช้ Chrome หรือ Firefox แทน หรือเปิดผ่าน HTTPS"
+        },
       });
       return;
     }

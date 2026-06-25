@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, getDocs, onSnapshot, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useGeolocation } from "@/lib/useGeolocation";
 import { distanceMeters } from "@/lib/utils";
@@ -43,7 +43,9 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
 
   const handleGpsCheckin = async (activity: ActivityDoc) => {
     if (!gps.position) return toast.error("รอสัญญาณ GPS");
-    if (gps.accuracy && gps.accuracy > 100) return toast.error(`ความแม่นยำ GPS ต่ำ (${gps.accuracy.toFixed(0)} ม.)`);
+    if (gps.accuracy !== null && gps.accuracy > 100) {
+      return toast.error(`ความแม่นยำ GPS ต่ำ (${gps.accuracy.toFixed(0)} ม.)`);
+    }
 
     setSubmitting(activity.id);
     try {
@@ -101,6 +103,22 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
 
   return (
     <div className="space-y-3">
+      {gps.loading && (
+        <Card className="border-blue-200 bg-blue-50">
+          <CardContent className="py-6 text-center text-sm text-blue-700">
+            กำลังตรวจสอบตำแหน่ง GPS...
+          </CardContent>
+        </Card>
+      )}
+
+      {gps.error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="py-4 text-center text-sm text-red-700">
+            {gps.error.message}
+          </CardContent>
+        </Card>
+      )}
+
       {activities.map((activity) => {
         const checked = isCheckedIn(activity.id);
         const dist = nearestDistance(activity);

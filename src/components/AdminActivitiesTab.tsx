@@ -209,7 +209,7 @@ function ActivityModal({
   const isNew = activity === "new";
   const [name, setName] = useState(isNew ? "" : activity.name);
   const [year, setYear] = useState(isNew ? userDoc.year : activity.year);
-  const [type, setType] = useState<"normal" | "external">(isNew ? "normal" : activity.type);
+  const [type, setType] = useState<"normal" | "external">(isNew ? "normal" : (activity.type || "normal"));
   const [radiusMeters, setRadiusMeters] = useState(isNew ? 30 : activity.radiusMeters);
   const [locations, setLocations] = useState<Array<{ id: string; name: string; lat: number; lng: number }>>(
     isNew ? [] : activity.locations,
@@ -219,7 +219,9 @@ function ActivityModal({
 
   const handleSave = async () => {
     if (!name.trim()) return toast.error("กรอกชื่อกิจกรรม");
-    if (locations.length === 0) return toast.error("เพิ่มจุดเช็คอินอย่างน้อย 1 จุด");
+    if (radiusMeters < 10 || radiusMeters > 500 || isNaN(radiusMeters)) {
+      return toast.error("ระยะเช็คอินต้องอยู่ระหว่าง 10-500 เมตร");
+    }
 
     setBusy(true);
     try {

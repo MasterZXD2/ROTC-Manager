@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { useEffect, useState, useMemo } from "react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Download, X, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { exemptActivityAttendance, unexemptActivityAttendance } from "@/lib/actions";
@@ -24,36 +25,40 @@ export function ActivityCheckinResults({
   const [checkins, setCheckins] = useState<ActivityCheckinDoc[]>([]);
   const [exemptions, setExemptions] = useState<ActivityExemptionDoc[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "present" | "absent" | "exempted">("all");
 
   useEffect(() => {
-    const load = async () => {
-      const [studentsSnap, checkinsSnap, exemptionsSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db(), "users"),
-            where("year", "==", activity.year),
-            where("role", "==", "student"),
-          ),
-        ),
-        getDocs(
-          query(
-            collection(db(), "activityCheckins"),
-            where("activityId", "==", activity.id),
-          ),
-        ),
-        getDocs(
-          query(
-            collection(db(), "activityExemptions"),
-            where("activityId", "==", activity.id),
-          ),
-        ),
-      ]);
+    const unsubStudents = onSnapshot(
+      query(
+        collection(db(), "users"),
+        where("year", "==", activity.year),
+        where("role", "==", "student"),
+      ),
+      (snap) => setStudents(snap.docs.map((d) => d.data() as UserDoc)),
+    );
 
-      setStudents(studentsSnap.docs.map((d) => d.data() as UserDoc));
-      setCheckins(checkinsSnap.docs.map((d) => d.data() as ActivityCheckinDoc));
-      setExemptions(exemptionsSnap.docs.map((d) => d.data() as ActivityExemptionDoc));
+    const unsubCheckins = onSnapshot(
+      query(
+        collection(db(), "activityCheckins"),
+        where("activityId", "==", activity.id),
+      ),
+      (snap) => setCheckins(snap.docs.map((d) => d.data() as ActivityCheckinDoc)),
+    );
+
+    const unsubExemptions = onSnapshot(
+      query(
+        collection(db(), "activityExemptions"),
+        where("activityId", "==", activity.id),
+      ),
+      (snap) => setExemptions(snap.docs.map((d) => d.data() as ActivityExemptionDoc)),
+    );
+
+    return () => {
+      unsubStudents();
+      unsubCheckins();
+      unsubExemptions();
     };
-    load();
   }, [activity.id, activity.year]);
 
   const handleExempt = async (studentUid: string) => {
@@ -65,14 +70,6 @@ export function ActivityCheckinResults({
         reason: "ยกเว้นโดยแอดมิน",
       });
       toast.success("ยกเว้นแล้ว");
-      // Reload exemptions
-      const snap = await getDocs(
-        query(
-          collection(db(), "activityExemptions"),
-          where("activityId", "==", activity.id),
-        ),
-      );
-      setExemptions(snap.docs.map((d) => d.data() as ActivityExemptionDoc));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ยกเว้นไม่สำเร็จ");
     } finally {
@@ -88,14 +85,6 @@ export function ActivityCheckinResults({
         studentUid,
       });
       toast.success("ยกเลิกการยกเว้นแล้ว");
-      // Reload exemptions
-      const snap = await getDocs(
-        query(
-          collection(db(), "activityExemptions"),
-          where("activityId", "==", activity.id),
-        ),
-      );
-      setExemptions(snap.docs.map((d) => d.data() as ActivityExemptionDoc));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ");
     } finally {
@@ -123,6 +112,30 @@ export function ActivityCheckinResults({
     toast.success("ดาวน์โหลด Excel แล้ว");
   };
 
+  const filtered = useMemo(() => {
+    return students.filter((s) => {
+      const checkin = checkins.find((c) => c.userId === s.uid);
+      const exemption = exemptions.find((e) => e.studentUid === s.uid);
+      const isCheckedIn = !!checkin;
+      const isExempted = !!exemption;
+
+      // Filter by status
+      if (filter === "present" && !isCheckedIn) return false;
+      if (filter === "absent" && (isCheckedIn || isExempted)) return false;
+      if (filter === "exempted" && !isExempted) return false;
+
+      // Search
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        return [s.studentId, s.fullName, s.nickname, s.classroom]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q));
+      }
+
+      return true;
+    });
+  }, [students, checkins, exemptions, filter, search]);
+
   const checkedInCount = checkins.length + exemptions.length;
   const totalCount = students.length;
 
@@ -149,11 +162,51 @@ export function ActivityCheckinResults({
           </div>
         </CardHeader>
         <CardContent>
-          {students.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground">ไม่มีนักเรียนในชั้นปีนี้</p>
+          <div className="mb-4 space-y-3">
+            <Input
+              type="text"
+              placeholder="ค้นหา (ชื่อ, รหัส, ห้อง)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full"
+            />
+            <div className="flex gap-2">
+              <Button
+                variant={filter === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("all")}
+              >
+                ทั้งหมด ({totalCount})
+              </Button>
+              <Button
+                variant={filter === "present" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("present")}
+              >
+                มา ({checkins.length})
+              </Button>
+              <Button
+                variant={filter === "absent" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("absent")}
+              >
+                ขาด ({totalCount - checkedInCount})
+              </Button>
+              <Button
+                variant={filter === "exempted" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilter("exempted")}
+              >
+                ยกเว้น ({exemptions.length})
+              </Button>
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground">ไม่พบข้อมูล</p>
           ) : (
             <div className="space-y-1">
-              {students.map((student) => {
+              {filtered.map((student) => {
                 const checkin = checkins.find((c) => c.userId === student.uid);
                 const exemption = exemptions.find((e) => e.studentUid === student.uid);
                 const isCheckedIn = !!checkin;
