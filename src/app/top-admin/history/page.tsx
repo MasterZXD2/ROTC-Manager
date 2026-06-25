@@ -119,6 +119,9 @@ function ActivityLogPage() {
         <Link href="/top-admin/history" className="rounded bg-primary px-3 py-1 text-primary-foreground">
           ประวัติทั้งหมด
         </Link>
+        <Link href="/top-admin/quick-checkin" className="rounded border px-3 py-1">
+          เช็คอินด่วน
+        </Link>
       </nav>
 
       <div className="mb-4 flex flex-wrap gap-2">

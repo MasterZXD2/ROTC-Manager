@@ -24,6 +24,7 @@ import { RosterExportModal } from "@/components/RosterExportModal";
 import { BulkImportModal } from "@/components/BulkImportModal";
 import { AdminGroupsTab } from "@/components/AdminGroupsTab";
 import { AdminActivitiesTab } from "@/components/AdminActivitiesTab";
+import { StudentCheckinView } from "@/components/StudentCheckinView";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { downloadXlsx, todayStamp, thaiDateTime } from "@/lib/exports";
 import { toast } from "sonner";
@@ -31,7 +32,7 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import type { UserDoc } from "@/lib/types";
 
 type Range = "today" | "week" | "month";
-type Tab = "checkins" | "users" | "groups" | "tasks" | "activities";
+type Tab = "checkins" | "users" | "groups" | "tasks" | "activities" | "quick-checkin";
 
 function rangeStart(r: Range): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -147,7 +148,10 @@ function AdminTeacherInner() {
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-6">
+        <Button variant={tab === "quick-checkin" ? "default" : "outline"} onClick={() => setTab("quick-checkin")}>
+          เช็คอินด่วน
+        </Button>
         <Button variant={tab === "checkins" ? "default" : "outline"} onClick={() => setTab("checkins")}>
           การเช็คอิน
         </Button>
@@ -164,6 +168,8 @@ function AdminTeacherInner() {
           <ListChecks className="mr-1 h-4 w-4" />งาน
         </Button>
       </div>
+
+      {tab === "quick-checkin" && userDoc && <StudentCheckinView userDoc={userDoc} />}
 
       {tab === "checkins" && (
         <>

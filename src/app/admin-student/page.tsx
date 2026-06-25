@@ -13,13 +13,14 @@ import { TasksPanel } from "@/components/TasksPanel";
 import { AttendanceStats } from "@/components/AttendanceStats";
 import { AdminGroupsTab } from "@/components/AdminGroupsTab";
 import { MyDutyView } from "@/components/MyDutyView";
+import { StudentCheckinView } from "@/components/StudentCheckinView";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { CheckinDoc } from "@/lib/types";
 import { ExternalLink, ListChecks, LogOut, ClipboardList, Users, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 
 type Range = "today" | "week" | "month";
-type Tab = "checkins" | "groups" | "tasks" | "myduty";
+type Tab = "checkins" | "groups" | "tasks" | "myduty" | "quick-checkin";
 
 function rangeStart(r: Range): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -80,7 +81,13 @@ function AdminStudentInner() {
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <Button
+          variant={tab === "quick-checkin" ? "default" : "outline"}
+          onClick={() => setTab("quick-checkin")}
+        >
+          เช็คอินด่วน
+        </Button>
         <Button
           variant={tab === "checkins" ? "default" : "outline"}
           onClick={() => setTab("checkins")}
@@ -106,6 +113,8 @@ function AdminStudentInner() {
           <ClipboardCheck className="mr-2 h-4 w-4" />งานของฉัน
         </Button>
       </div>
+
+      {tab === "quick-checkin" && userDoc && <StudentCheckinView userDoc={userDoc} />}
 
       {tab === "checkins" && (
         <>

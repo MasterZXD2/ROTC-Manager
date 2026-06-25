@@ -109,6 +109,7 @@ function Nav() {
       <Link href="/top-admin/activities" className="rounded border px-3 py-1">กิจกรรม</Link>
       <Link href="/top-admin/tasks" className="rounded border px-3 py-1">งานทุกชั้นปี</Link>
       <Link href="/top-admin/history" className="rounded border px-3 py-1">ประวัติทั้งหมด</Link>
+      <Link href="/top-admin/quick-checkin" className="rounded border px-3 py-1">เช็คอินด่วน</Link>
     </nav>
   );
 }
