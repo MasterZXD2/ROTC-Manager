@@ -7,8 +7,19 @@ import {
   signOut as fbSignOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  query,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import { auth, db, googleProvider } from "./firebase";
+import { isProfileComplete } from "./profile";
 import type { UserDoc } from "./types";
 
 const BOOTSTRAP_EMAIL = "goten8615xd@gmail.com";
@@ -23,16 +34,59 @@ interface AuthState {
 
 const Ctx = createContext<AuthState | null>(null);
 
-/** สร้าง user doc ครั้งแรกถ้ายังไม่มี — ทำหน้าที่แทน auth trigger เดิม */
+async function findExistingProfileByEmail(email: string): Promise<UserDoc | null> {
+  const snap = await getDocs(
+    query(collection(db(), "users"), where("email", "==", email), limit(5)),
+  );
+  const matches = snap.docs.map((d) => d.data() as UserDoc);
+  return (
+    matches.find((u) => u.role === "student" && isProfileComplete(u)) ??
+    matches.find((u) => isProfileComplete(u)) ??
+    matches[0] ??
+    null
+  );
+}
+
 async function ensureUserDoc(u: User) {
   const ref = doc(db(), "users", u.uid);
   const snap = await getDoc(ref);
   if (snap.exists()) return;
-  const isBootstrap =
-    (u.email ?? "").toLowerCase() === BOOTSTRAP_EMAIL.toLowerCase();
+
+  const email = u.email ?? "";
+  const isBootstrap = email.toLowerCase() === BOOTSTRAP_EMAIL.toLowerCase();
+  if (email) {
+    const existing = await findExistingProfileByEmail(email);
+    if (existing && existing.uid !== u.uid) {
+      const restored: UserDoc = {
+        ...existing,
+        uid: u.uid,
+        email,
+        role: isBootstrap ? "top_admin" : "student",
+        photoURL: u.photoURL ?? existing.photoURL ?? "",
+        updatedAt: Date.now(),
+      };
+
+      await setDoc(ref, restored);
+      console.warn("Recovered user profile by email", {
+        email,
+        currentUid: u.uid,
+        previousUid: existing.uid,
+        previousRole: existing.role,
+        restoredRole: restored.role,
+      });
+      return;
+    }
+
+    console.warn("No user profile for current uid; creating a fresh profile", {
+      email,
+      currentUid: u.uid,
+      foundEmailProfile: !!existing,
+    });
+  }
+
   await setDoc(ref, {
     uid: u.uid,
-    email: u.email ?? "",
+    email,
     role: isBootstrap ? "top_admin" : "student",
     fullName: "",
     nickname: "",

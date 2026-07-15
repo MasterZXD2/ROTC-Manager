@@ -15,6 +15,7 @@ export interface UserDoc {
   studentId: string;
   year: number;
   isTester?: boolean;
+  isTrafficRepair?: boolean;
   createdAt: number;
   updatedAt: number;
   photoURL?: string;
@@ -62,6 +63,7 @@ export interface CheckinDoc {
   method: "gps" | "emergency_code" | "tester";
   /** รอบเช็คอิน: in = เริ่ม, out = จบ */
   phase?: "in" | "out";
+  trafficRepair?: boolean;
   groupId?: string | null;
   groupName?: string | null;
   sessionId?: string | null;
@@ -300,4 +302,14 @@ export interface ActivityExemptionDoc {
   exemptedBy: string;
   exemptedByName: string;
   exemptedAt: number;
+}
+
+export interface CharacterEvaluationDoc {
+  id: string; // `${year}_${studentUid}`
+  studentUid: string;
+  year: number;
+  evaluated: boolean;
+  evaluatedBy: string;
+  evaluatedByName: string;
+  evaluatedAt: number;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, onSnapshot, query, where, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ export function AdminGroupsTab({
   userDoc: UserDoc;
   isTeacher: boolean;
 }) {
+  const isTopAdmin = userDoc.role === "top_admin";
+  const [selectedYear, setSelectedYear] = useState<number>(userDoc.year || 1);
   const [groups, setGroups] = useState<GroupDoc[]>([]);
   const [students, setStudents] = useState<UserDoc[]>([]);
   const [editModal, setEditModal] = useState<GroupDoc | "new" | null>(null);
@@ -32,12 +34,10 @@ export function AdminGroupsTab({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const confirm = useConfirm();
 
-  const isTopAdmin = userDoc.role === "top_admin";
+  const activeYear = isTopAdmin ? selectedYear : userDoc.year;
 
   useEffect(() => {
-    const q = isTopAdmin
-      ? query(collection(db(), "groups"))
-      : query(collection(db(), "groups"), where("year", "==", userDoc.year));
+    const q = query(collection(db(), "groups"), where("year", "==", activeYear));
     return onSnapshot(q, (s) =>
       setGroups(
         s.docs
@@ -45,24 +45,25 @@ export function AdminGroupsTab({
           .sort((a, b) => (a.order ?? a.number) - (b.order ?? b.number)),
       ),
     );
-  }, [userDoc.year, isTopAdmin]);
+  }, [activeYear]);
 
   useEffect(() => {
-    if (!isTopAdmin && !userDoc.year) return;
-    const q = isTopAdmin
-      ? query(
-          collection(db(), "users"),
-          where("role", "==", "student"),
-          orderBy("fullName"),
-        )
-      : query(
-          collection(db(), "users"),
-          where("year", "==", userDoc.year),
-          where("role", "==", "student"),
-          orderBy("fullName"),
-        );
-    return onSnapshot(q, (s) => setStudents(s.docs.map((d) => d.data() as UserDoc)));
-  }, [userDoc.year, isTopAdmin]);
+    if (!activeYear) return;
+    const q = query(
+      collection(db(), "users"),
+      where("year", "==", activeYear),
+      where("role", "==", "student"),
+    );
+    return onSnapshot(q, (s) =>
+      setStudents(
+        s.docs
+          .map((d) => d.data() as UserDoc)
+          .sort((a, b) =>
+            (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"),
+          ),
+      ),
+    );
+  }, [activeYear]);
 
   const handleCheck = async (group: GroupDoc, status: "pass" | "fail") => {
     try {
@@ -85,7 +86,7 @@ export function AdminGroupsTab({
     if (!ok) return;
     setBusy(true);
     try {
-      await resetAllGroupChecks(userDoc.uid, userDoc.year);
+      await resetAllGroupChecks(userDoc.uid, activeYear);
       toast.success("รีเซ็ตแล้ว");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ");
@@ -124,6 +125,17 @@ export function AdminGroupsTab({
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">กลุ่มจราจร</h2>
         <div className="flex gap-2">
+          {isTopAdmin && (
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="h-9 rounded-lg border bg-background px-3 text-sm"
+            >
+              {[1, 2, 3, 4, 5].map((y) => (
+                <option key={y} value={y}>ปี {y}</option>
+              ))}
+            </select>
+          )}
           <Button size="sm" variant="outline" onClick={handleReset} disabled={busy}>
             <RotateCcw className="mr-2 h-4 w-4" />
             รีเซ็ต
@@ -193,7 +205,7 @@ export function AdminGroupsTab({
           group={editModal === "new" ? null : editModal}
           students={students}
           callerUid={userDoc.uid}
-          year={userDoc.year}
+          year={activeYear}
           onClose={() => setEditModal(null)}
         />
       )}
@@ -211,7 +223,7 @@ export function AdminGroupsTab({
         <BulkTextModal
           students={students}
           callerUid={userDoc.uid}
-          year={userDoc.year}
+          year={activeYear}
           onClose={() => setBulkTextModal(false)}
         />
       )}

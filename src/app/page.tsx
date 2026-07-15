@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { isProfileComplete } from "@/lib/profile";
 import { Loader2 } from "lucide-react";
 
 export default function RootPage() {
@@ -17,7 +18,7 @@ export default function RootPage() {
     if (userDoc.role === "admin_teacher" || userDoc.role === "admin")
       return router.replace("/admin-teacher");
     if (userDoc.role === "admin_student") return router.replace("/admin-student");
-    if (!userDoc.fullName || !userDoc.studentId || !userDoc.year)
+    if (!isProfileComplete(userDoc))
       return router.replace("/register");
     router.replace("/student/checkin");
   }, [loading, fbUser, userDoc, router]);

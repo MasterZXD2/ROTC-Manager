@@ -93,8 +93,8 @@ export function TrafficCheckin({ userDoc }: { userDoc: UserDoc }) {
       const d = distanceMeters(gps.position, loc);
       if (d < minDist) minDist = d;
     }
-    return minDist <= config.allowedRadiusMeters;
-  }, [config, gps.position, activeSlot, tick]);
+    return minDist <= config.allowedRadiusMeters && (duty.isMyTurn || !!userDoc.isTrafficRepair);
+  }, [config, gps.position, activeSlot, tick, duty.isMyTurn, userDoc.isTrafficRepair]);
 
   const handleCheckin = async () => {
     if (!userDoc) return;
@@ -206,6 +206,11 @@ export function TrafficCheckin({ userDoc }: { userDoc: UserDoc }) {
                   {duty.isMyTurn && <span className="ml-2 text-green-600">← ถึงเวรคุณ!</span>}
                 </p>
               )}
+            </div>
+          )}
+          {userDoc.isTrafficRepair && (
+            <div className="rounded-lg bg-blue-50 p-3 text-sm font-medium text-blue-700">
+              สถานะกำลังซ่อม: เช็คอินได้โดยไม่ต้องเป็นกลุ่มเวรวันนี้
             </div>
           )}
 

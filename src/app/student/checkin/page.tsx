@@ -111,6 +111,7 @@ function CheckinInner() {
   }, [config, gps.position]);
 
   const isTester = !!userDoc?.isTester;
+  const isTrafficRepair = !!userDoc?.isTrafficRepair;
 
   const withinTime = !!activeSlot;
   const withinRadius =
@@ -123,7 +124,7 @@ function CheckinInner() {
     gps.accuracy !== null && config !== null && gps.accuracy <= config.maxAccuracyMeters;
   const canCheckin = isTester
     ? !!gps.position
-    : withinTime && withinRadius && accuracyOk && duty.isMyTurn && !dailyDone && !!gps.position;
+    : withinTime && withinRadius && accuracyOk && (duty.isMyTurn || isTrafficRepair) && !dailyDone && !!gps.position;
 
   const onCheckin = async () => {
     if (!gps.position || !gps.accuracy || !userDoc) return;
@@ -152,6 +153,11 @@ function CheckinInner() {
           {isTester && (
             <div className="mt-1 inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
               โหมด Tester · ข้ามทุกเงื่อนไข
+            </div>
+          )}
+          {!isTester && isTrafficRepair && (
+            <div className="mt-1 inline-block rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
+              กำลังซ่อม · ข้ามเงื่อนไขกลุ่มเวร
             </div>
           )}
         </div>
@@ -191,9 +197,13 @@ function CheckinInner() {
       ) : (
         <>
           {!isTester && (
-            <Card className={`mb-3 ${duty.isMyTurn ? "border-green-300 bg-green-50" : "border-amber-300 bg-amber-50"}`}>
+            <Card className={`mb-3 ${duty.isMyTurn || isTrafficRepair ? "border-green-300 bg-green-50" : "border-amber-300 bg-amber-50"}`}>
               <CardContent className="pt-4 text-sm">
-                {!duty.myGroup ? (
+                {isTrafficRepair ? (
+                  <span className="font-medium text-green-800">
+                    ✓ สถานะกำลังซ่อม — เช็คอินได้โดยไม่ต้องเป็นกลุ่มเวรวันนี้
+                  </span>
+                ) : !duty.myGroup ? (
                   <span className="text-amber-800">คุณยังไม่ได้อยู่ในกลุ่มจราจร — เช็คอินไม่ได้</span>
                 ) : !duty.currentDuty ? (
                   <span className="text-amber-800">วันนี้ไม่มีกลุ่มที่เป็นเวร</span>

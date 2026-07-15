@@ -19,26 +19,26 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import { ActivityCheckinResults } from "@/components/ActivityCheckinResults";
 
 export function AdminActivitiesTab({ userDoc }: { userDoc: UserDoc }) {
+  const isTopAdmin = userDoc.role === "top_admin";
+  const [selectedYear, setSelectedYear] = useState<number>(userDoc.year || 1);
   const [activities, setActivities] = useState<ActivityDoc[]>([]);
   const [showModal, setShowModal] = useState<ActivityDoc | "new" | null>(null);
   const [showResults, setShowResults] = useState<ActivityDoc | null>(null);
   const [emergencyCode, setEmergencyCode] = useState<{ code: string; activityName: string } | null>(null);
   const confirm = useConfirm();
 
-  const isTopAdmin = userDoc.role === "top_admin";
+  const activeYear = isTopAdmin ? selectedYear : userDoc.year;
 
   useEffect(() => {
-    const q = isTopAdmin
-      ? query(collection(db(), "activities"), orderBy("createdAt", "desc"))
-      : query(
-          collection(db(), "activities"),
-          where("year", "==", userDoc.year),
-          orderBy("createdAt", "desc"),
-        );
+    const q = query(
+      collection(db(), "activities"),
+      where("year", "==", activeYear),
+      orderBy("createdAt", "desc"),
+    );
     return onSnapshot(q, (snap) =>
       setActivities(snap.docs.map((d) => d.data() as ActivityDoc)),
     );
-  }, [userDoc.year, isTopAdmin]);
+  }, [activeYear]);
 
   const handleToggle = async (activity: ActivityDoc) => {
     try {
@@ -76,10 +76,23 @@ export function AdminActivitiesTab({ userDoc }: { userDoc: UserDoc }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">กิจกรรม</h2>
-        <Button onClick={() => setShowModal("new")} size="sm">
-          <Plus className="mr-2 h-4 w-4" />
-          เพิ่มการเช็คอิน
-        </Button>
+        <div className="flex items-center gap-2">
+          {isTopAdmin && (
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(Number(e.target.value))}
+              className="h-9 rounded-lg border bg-background px-3 text-sm"
+            >
+              {[1, 2, 3, 4, 5].map((y) => (
+                <option key={y} value={y}>ปี {y}</option>
+              ))}
+            </select>
+          )}
+          <Button onClick={() => setShowModal("new")} size="sm">
+            <Plus className="mr-2 h-4 w-4" />
+            เพิ่มการเช็คอิน
+          </Button>
+        </div>
       </div>
 
       {activities.length === 0 ? (
@@ -156,7 +169,14 @@ export function AdminActivitiesTab({ userDoc }: { userDoc: UserDoc }) {
         </div>
       )}
 
-      {showModal && <ActivityModal activity={showModal} userDoc={userDoc} onClose={() => setShowModal(null)} />}
+      {showModal && (
+        <ActivityModal
+          activity={showModal}
+          userDoc={userDoc}
+          defaultYear={activeYear}
+          onClose={() => setShowModal(null)}
+        />
+      )}
       {showResults && (
         <ActivityCheckinResults
           activity={showResults}
@@ -200,15 +220,17 @@ export function AdminActivitiesTab({ userDoc }: { userDoc: UserDoc }) {
 function ActivityModal({
   activity,
   userDoc,
+  defaultYear,
   onClose,
 }: {
   activity: ActivityDoc | "new";
   userDoc: UserDoc;
+  defaultYear: number;
   onClose: () => void;
 }) {
   const isNew = activity === "new";
   const [name, setName] = useState(isNew ? "" : activity.name);
-  const [year, setYear] = useState(isNew ? userDoc.year : activity.year);
+  const [year, setYear] = useState(isNew ? defaultYear : activity.year);
   const [type, setType] = useState<"normal" | "external">(isNew ? "normal" : (activity.type || "normal"));
   const [radiusMeters, setRadiusMeters] = useState(isNew ? 30 : activity.radiusMeters);
   const [locations, setLocations] = useState<Array<{ id: string; name: string; lat: number; lng: number }>>(

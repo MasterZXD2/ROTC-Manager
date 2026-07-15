@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  collection, onSnapshot, orderBy, query, where,
+  collection, onSnapshot, query, where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { RequireRole } from "@/components/RequireRole";
@@ -22,10 +22,16 @@ function AdminsInner() {
   useEffect(() => {
     const q = query(
       collection(db(), "users"),
-      where("role", "in", ["admin", "top_admin"]),
+      where("role", "in", ["admin_student", "admin_teacher", "admin", "top_admin"]),
     );
     const unsub = onSnapshot(q, (snap) =>
-      setAdmins(snap.docs.map((d) => d.data() as UserDoc)),
+      setAdmins(
+        snap.docs
+          .map((d) => d.data() as UserDoc)
+          .sort((a, b) =>
+            (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"),
+          ),
+      ),
     );
     return () => unsub();
   }, []);
@@ -72,13 +78,17 @@ function AdminsInner() {
                   <td className="px-3 py-2">{u.year || "—"}</td>
                   <td className="px-3 py-2">
                     <span className={`rounded px-2 py-0.5 text-xs ${
-                      u.role === "top_admin" ? "bg-purple-100 text-purple-800" : "bg-blue-100 text-blue-800"
+                      u.role === "top_admin" ? "bg-purple-100 text-purple-800"
+                        : u.role === "admin_teacher" || u.role === "admin" ? "bg-blue-100 text-blue-800"
+                        : "bg-green-100 text-green-800"
                     }`}>
-                      {u.role === "top_admin" ? "Top Admin" : "Admin"}
+                      {u.role === "top_admin" ? "Top Admin"
+                        : u.role === "admin_teacher" || u.role === "admin" ? "Admin Teacher"
+                        : "Admin Student"}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {u.role === "admin" && (
+                    {u.role !== "top_admin" && (
                       <Button
                         size="sm" variant="outline"
                         disabled={busy === u.uid}

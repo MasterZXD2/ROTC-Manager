@@ -11,10 +11,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CheckinDoc } from "@/lib/types";
-import { ExternalLink, KeyRound, LogOut, Trash2, Users, UserPlus, ListChecks, Pencil, Download, Calendar } from "lucide-react";
+import { ExternalLink, KeyRound, LogOut, Trash2, Users, UserPlus, ListChecks, Pencil, Download, Calendar, Wrench } from "lucide-react";
 import Link from "next/link";
 import {
-  deleteUserAndCheckins, requestEmergencyCode, createInviteCode,
+  deleteUserAndCheckins, requestEmergencyCode, createInviteCode, setUserTrafficRepair,
 } from "@/lib/actions";
 import { EditUserModal } from "@/components/EditUserModal";
 import { TasksPanel } from "@/components/TasksPanel";
@@ -26,6 +26,7 @@ import { AdminGroupsTab } from "@/components/AdminGroupsTab";
 import { AdminActivitiesTab } from "@/components/AdminActivitiesTab";
 import { StudentCheckinView } from "@/components/StudentCheckinView";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UserEvaluationTab } from "@/components/UserEvaluationTab";
 import { downloadXlsx, todayStamp, thaiDateTime } from "@/lib/exports";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -33,6 +34,7 @@ import type { UserDoc } from "@/lib/types";
 
 type Range = "today" | "week" | "month";
 type Tab = "checkins" | "users" | "groups" | "tasks" | "activities" | "quick-checkin";
+type UsersSubTab = "manage" | "evaluation";
 
 function rangeStart(r: Range): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -57,6 +59,7 @@ function AdminTeacherInner() {
   const [busyInv, setBusyInv] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [usersSubTab, setUsersSubTab] = useState<UsersSubTab>("manage");
 
   const exportCheckins = () => {
     if (items.length === 0) {
@@ -224,47 +227,74 @@ function AdminTeacherInner() {
 
       {tab === "users" && userDoc && (
         <>
-          <div className="mb-3 flex flex-wrap justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
-              <UserPlus className="mr-1 h-4 w-4" />นำเข้านักเรียน
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setRosterOpen(true)}>
-              <Download className="mr-1 h-4 w-4" />ส่งออกรายชื่อ
-            </Button>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={usersSubTab === "manage" ? "default" : "outline"}
+                onClick={() => setUsersSubTab("manage")}
+              >
+                จัดการข้อมูล
+              </Button>
+              <Button
+                size="sm"
+                variant={usersSubTab === "evaluation" ? "default" : "outline"}
+                onClick={() => setUsersSubTab("evaluation")}
+              >
+                ผลประเมิน
+              </Button>
+            </div>
+
+            {usersSubTab === "manage" && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+                  <UserPlus className="mr-1 h-4 w-4" />นำเข้านักเรียน
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setRosterOpen(true)}>
+                  <Download className="mr-1 h-4 w-4" />ส่งออกรายชื่อ
+                </Button>
+              </div>
+            )}
           </div>
 
-          <Card className="mb-3 border-blue-300">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base text-blue-700">รหัสเชิญสำหรับ Login</CardTitle>
-              <p className="text-xs text-muted-foreground">
-                ให้นักเรียนใหม่กรอกตอนสมัคร — ระบบจะตั้งเป็นปี {userDoc.year} อัตโนมัติ
-              </p>
-            </CardHeader>
-            <CardContent>
-              {invCode ? (
-                <div className="space-y-1">
-                  <div className="text-3xl font-bold tracking-widest text-blue-700">{invCode.value}</div>
+          {usersSubTab === "manage" ? (
+            <>
+              <Card className="mb-3 border-blue-300">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base text-blue-700">รหัสเชิญสำหรับ Login</CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    หมดอายุ {new Date(invCode.expiresAt).toLocaleTimeString("th-TH", {
-                      timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit",
-                    })}
+                    ให้นักเรียนใหม่กรอกตอนสมัคร — ระบบจะตั้งเป็นปี {userDoc.year} อัตโนมัติ
                   </p>
-                  <Button variant="outline" size="sm" onClick={newInvCode} disabled={busyInv}>สร้างใหม่</Button>
-                </div>
-              ) : (
-                <Button onClick={newInvCode} disabled={busyInv}>
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  สร้างรหัสเชิญ (5 นาที)
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent>
+                  {invCode ? (
+                    <div className="space-y-1">
+                      <div className="text-3xl font-bold tracking-widest text-blue-700">{invCode.value}</div>
+                      <p className="text-xs text-muted-foreground">
+                        หมดอายุ {new Date(invCode.expiresAt).toLocaleTimeString("th-TH", {
+                          timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        })}
+                      </p>
+                      <Button variant="outline" size="sm" onClick={newInvCode} disabled={busyInv}>สร้างใหม่</Button>
+                    </div>
+                  ) : (
+                    <Button onClick={newInvCode} disabled={busyInv}>
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      สร้างรหัสเชิญ (5 นาที)
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
 
-          <UsersInYear
-            year={userDoc.year}
-            callerUid={userDoc.uid}
-            callerRole={(userDoc.role === "top_admin" ? "top_admin" : "admin_teacher")}
-          />
+              <UsersInYear
+                year={userDoc.year}
+                callerUid={userDoc.uid}
+                callerRole={(userDoc.role === "top_admin" ? "top_admin" : "admin_teacher")}
+              />
+            </>
+          ) : (
+            <UserEvaluationTab callerUid={userDoc.uid} yearScope={userDoc.year} />
+          )}
         </>
       )}
 
@@ -374,15 +404,25 @@ function UsersInYear({
   const [editing, setEditing] = useState<UserDoc | null>(null);
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<string>("");
+  const [sortMode, setSortMode] = useState<"name" | "classroom">("name");
   const confirm = useConfirm();
   const isTopAdmin = callerRole === "top_admin";
 
   useEffect(() => {
-    // top_admin เห็นทุกปีอยู่แล้ว, admin_teacher ก็ให้เห็นทุกปี (แต่แก้/ลบได้เฉพาะปีตัวเอง)
-    const q = query(collection(db(), "users"), orderBy("fullName"));
-    const unsub = onSnapshot(q, (snap) => setUsers(snap.docs.map((d) => d.data() as UserDoc)));
+    const q = isTopAdmin
+      ? query(collection(db(), "users"))
+      : query(collection(db(), "users"), where("year", "==", year));
+    const unsub = onSnapshot(q, (snap) =>
+      setUsers(
+        snap.docs
+          .map((d) => d.data() as UserDoc)
+          .sort((a, b) =>
+            (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"),
+          ),
+      ),
+    );
     return () => unsub();
-  }, []);
+  }, [isTopAdmin, year]);
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -393,8 +433,16 @@ function UsersInYear({
       return [u.fullName, u.nickname, u.studentId, u.classroom]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(s));
+    }).sort((a, b) => {
+      const nameA = a.fullName || a.email || a.uid;
+      const nameB = b.fullName || b.email || b.uid;
+      if (sortMode === "classroom") {
+        return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
+          || nameA.localeCompare(nameB, "th", { numeric: true });
+      }
+      return nameA.localeCompare(nameB, "th", { numeric: true });
     });
-  }, [users, search, yearFilter]);
+  }, [users, search, yearFilter, sortMode]);
 
   const onDelete = async (uid: string, name: string) => {
     const ok = await confirm({
@@ -412,6 +460,15 @@ function UsersInYear({
     }
   };
 
+  const toggleTrafficRepair = async (uid: string, current: boolean) => {
+    try {
+      await setUserTrafficRepair(callerUid, uid, !current);
+      toast.success(current ? "ปิดสถานะกำลังซ่อมแล้ว" : "เปิดสถานะกำลังซ่อมแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ");
+    }
+  };
+
   return (
     <>
       <div className="mb-3 flex flex-wrap gap-2">
@@ -422,11 +479,21 @@ function UsersInYear({
           className="max-w-xs"
         />
         <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as "name" | "classroom")}
+          className="h-11 rounded-lg border bg-background px-3"
+          aria-label="เรียงผู้ใช้"
+        >
+          <option value="name">เรียงตามลำดับตัวอักษร</option>
+          <option value="classroom">เรียงตามห้อง</option>
+        </select>
+        <select
           value={yearFilter}
           onChange={(e) => setYearFilter(e.target.value)}
+          disabled={!isTopAdmin}
           className="h-11 rounded-lg border px-3"
         >
-          <option value="">ทุกชั้นปี</option>
+          <option value="">{isTopAdmin ? "ทุกชั้นปี" : `ปี ${year}`}</option>
           {[1, 2, 3, 4, 5].map((y) => (
             <option key={y} value={y}>ปี {y}</option>
           ))}
@@ -442,6 +509,7 @@ function UsersInYear({
                 <th className="px-3 py-2">ห้อง</th>
                 <th className="px-3 py-2">ปี</th>
                 <th className="px-3 py-2">รหัส นร.</th>
+                <th className="px-3 py-2">ซ่อม</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -456,6 +524,22 @@ function UsersInYear({
                     <td className="px-3 py-2">{u.classroom}</td>
                     <td className="px-3 py-2">{u.year}</td>
                     <td className="px-3 py-2">{u.studentId}</td>
+                    <td className="px-3 py-2">
+                      {canManage ? (
+                        <Button
+                          variant={u.isTrafficRepair ? "default" : "outline"}
+                          size="sm"
+                          className="h-8"
+                          onClick={() => toggleTrafficRepair(u.uid, !!u.isTrafficRepair)}
+                          title="กำลังซ่อม: เช็คอินจราจรได้โดยไม่ต้องเป็นกลุ่มเวรวันนี้ แต่ยังต้องอยู่ในเวลา/ระยะ/GPS"
+                        >
+                          <Wrench className="mr-1 h-3 w-3" />
+                          {u.isTrafficRepair ? "เปิด" : "ปิด"}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       {canManage ? (
                         <>

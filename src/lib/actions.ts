@@ -109,6 +109,7 @@ export async function submitCheckin(
     throw new Error("กรุณากรอกข้อมูลโปรไฟล์ให้ครบ");
 
   const isTester = !!profile.isTester;
+  const isTrafficRepair = !!profile.isTrafficRepair;
 
   if (!isTester && accuracy > cfg.maxAccuracyMeters)
     throw new Error(`สัญญาณ GPS อ่อนเกินไป (±${Math.round(accuracy)}ม.)`);
@@ -122,14 +123,15 @@ export async function submitCheckin(
   // - ชั้นปียังไม่มีกลุ่มที่เป็นเวร (ทุกกลุ่มติ๊กหมดแล้ว) → ไม่ให้เช็คอิน
   // - กลุ่มของ user ไม่ใช่เวรปัจจุบัน → ไม่ให้เช็คอิน
   // - อยู่นอกช่วงเวลาเช็คอิน → ไม่ให้เช็คอิน
-  if (!isTester) {
+  if (!isTester && !isTrafficRepair) {
     if (!duty.myGroup) throw new Error("คุณยังไม่ได้อยู่ในกลุ่มจราจร");
     if (!duty.currentDuty) throw new Error("วันนี้ไม่มีกลุ่มที่เป็นเวร");
     if (duty.currentDuty.id !== duty.myGroup.id)
       throw new Error(`ยังไม่ถึงเวรของกลุ่มคุณ (ตอนนี้เวรกลุ่ม ${duty.currentDuty.number})`);
-    if (!findActiveSlot(cfg.timeSlots))
-      throw new Error("อยู่นอกช่วงเวลาเช็คอิน");
   }
+
+  if (!isTester && !findActiveSlot(cfg.timeSlots))
+    throw new Error("อยู่นอกช่วงเวลาเช็คอิน");
 
   if (!isTester && cfg.locations.length === 0)
     throw new Error("ยังไม่ได้กำหนดจุดเช็คอิน");
@@ -171,8 +173,9 @@ export async function submitCheckin(
       method: isTester ? "tester" : "gps",
       phase,
       groupId: duty.myGroup?.id ?? null,
-      groupName: duty.myGroup ? `กลุ่ม ${duty.myGroup.number}` : null,
+      groupName: duty.myGroup ? `กลุ่ม ${duty.myGroup.number}` : (isTrafficRepair ? "กำลังซ่อม" : null),
       sessionId: null,
+      trafficRepair: isTrafficRepair,
     });
     if (counter.exists()) {
       tx.update(counterRef, { count: used + 1, updatedAt: now });
@@ -192,7 +195,8 @@ export async function submitCheckin(
         classroom: profile.classroom,
         method: isTester ? "tester" : "gps",
         phase,
-        groupName: duty.myGroup ? `กลุ่ม ${duty.myGroup.number}` : undefined,
+        groupName: duty.myGroup ? `กลุ่ม ${duty.myGroup.number}` : (isTrafficRepair ? "กำลังซ่อม" : undefined),
+        trafficRepair: isTrafficRepair,
       },
       profile.year,
     );
@@ -407,6 +411,27 @@ export async function setUserTester(
   await setDoc(
     doc(db(), "users", targetUid),
     { ...target, isTester, updatedAt: Date.now() },
+    { merge: true },
+  );
+}
+
+export async function setUserTrafficRepair(
+  callerUid: string,
+  targetUid: string,
+  isTrafficRepair: boolean,
+): Promise<void> {
+  const caller = await loadProfile(callerUid);
+  const target = await loadProfile(targetUid);
+  const isTeacher = caller.role === "admin_teacher" || caller.role === "admin";
+  const isTop = caller.role === "top_admin";
+  if (!isTeacher && !isTop) throw new Error("ไม่มีสิทธิ์");
+  if (isTeacher && (target.role !== "student" || target.year !== caller.year)) {
+    throw new Error("ครูตั้งค่าได้เฉพาะนักเรียนในชั้นปีตัวเอง");
+  }
+
+  await setDoc(
+    doc(db(), "users", targetUid),
+    { ...target, isTrafficRepair, updatedAt: Date.now() },
     { merge: true },
   );
 }
@@ -1224,7 +1249,30 @@ export async function deleteActivity(
   if (!isTop && cur.year !== caller.year)
     throw new Error("ลบได้เฉพาะชั้นปีตัวเอง");
 
-  await deleteDoc(ref);
+  const deleteRelated = async (collectionName: string) => {
+    while (true) {
+      const snap = await getDocs(
+        query(collection(db(), collectionName), where("activityId", "==", activityId), limit(400)),
+      );
+      if (snap.empty) return;
+      const batch = writeBatch(db());
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+      if (snap.size < 400) return;
+    }
+  };
+
+  await Promise.all([
+    deleteRelated("activityCheckins"),
+    deleteRelated("activityExemptions"),
+    deleteRelated("activityEmergencyCodes"),
+  ]);
+
+  {
+    const batch = writeBatch(db());
+    batch.delete(ref);
+    await batch.commit();
+  }
 }
 
 export async function toggleActivityOpen(
@@ -1262,10 +1310,7 @@ export async function submitActivityCheckin(
   if (!activity.isOpen) throw new Error("กิจกรรมนี้ยังไม่เปิดให้เช็คอิน");
   if (activity.year !== profile.year) throw new Error("กิจกรรมนี้ไม่ใช่ของชั้นปีคุณ");
 
-  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง (ใช้ doc id แบบ deterministic)
   const checkinId = `${activityId}_${uid}`;
-  const existingSnap = await getDoc(doc(db(), "activityCheckins", checkinId));
-  if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
 
   // หาจุดใกล้สุด
   let best: { loc: any; dist: number } | null = null;
@@ -1277,23 +1322,29 @@ export async function submitActivityCheckin(
   if (best.dist > activity.radiusMeters)
     throw new Error(`คุณอยู่ห่างจากจุดเช็คอิน "${best.loc.name}" ${best.dist.toFixed(0)} เมตร (อนุญาตไม่เกิน ${activity.radiusMeters} ม.)`);
 
-  await setDoc(doc(db(), "activityCheckins", checkinId), {
-    id: checkinId,
-    activityId,
-    activityName: activity.name,
-    userId: uid,
-    fullName: profile.fullName,
-    nickname: profile.nickname,
-    classroom: profile.classroom,
-    year: profile.year,
-    studentId: profile.studentId,
-    timestamp: Date.now(),
-    location: pos,
-    accuracy,
-    distanceMeters: best.dist,
-    mapLink: googleMapsLink(pos.lat, pos.lng),
-    locationId: best.loc.id,
-    method: "gps",
+  await runTransaction(db(), async (tx) => {
+    const checkinRef = doc(db(), "activityCheckins", checkinId);
+    const existingSnap = await tx.get(checkinRef);
+    if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+
+    tx.set(checkinRef, {
+      id: checkinId,
+      activityId,
+      activityName: activity.name,
+      userId: uid,
+      fullName: profile.fullName,
+      nickname: profile.nickname,
+      classroom: profile.classroom,
+      year: profile.year,
+      studentId: profile.studentId,
+      timestamp: Date.now(),
+      location: pos,
+      accuracy,
+      distanceMeters: best.dist,
+      mapLink: googleMapsLink(pos.lat, pos.lng),
+      locationId: best.loc.id,
+      method: "gps",
+    });
   });
 }
 
@@ -1303,43 +1354,43 @@ export async function submitActivityEmergencyCheckin(
 ): Promise<void> {
   const profile = await loadProfile(uid);
   const codeRef = doc(db(), "activityEmergencyCodes", code);
-  const codeSnap = await getDoc(codeRef);
-  if (!codeSnap.exists()) throw new Error("รหัสไม่ถูกต้อง");
-  const codeData = codeSnap.data() as any;
+  await runTransaction(db(), async (tx) => {
+    const codeSnap = await tx.get(codeRef);
+    if (!codeSnap.exists()) throw new Error("รหัสไม่ถูกต้อง");
+    const codeData = codeSnap.data() as any;
 
-  if (codeData.used) throw new Error("รหัสนี้ถูกใช้ไปแล้ว");
-  if (Date.now() > codeData.expiresAt) throw new Error("รหัสหมดอายุแล้ว");
-  if (codeData.year !== profile.year) throw new Error("รหัสนี้ไม่ใช่ของชั้นปีคุณ");
+    if (codeData.used) throw new Error("รหัสนี้ถูกใช้ไปแล้ว");
+    if (Date.now() > codeData.expiresAt) throw new Error("รหัสหมดอายุแล้ว");
+    if (codeData.year !== profile.year) throw new Error("รหัสนี้ไม่ใช่ของชั้นปีคุณ");
 
-  // เช็คว่าเคยเช็คอินกิจกรรมนี้แล้วหรือยัง (ใช้ deterministic ID)
-  const checkinId = `${codeData.activityId}_${uid}`;
-  const existingSnap = await getDoc(doc(db(), "activityCheckins", checkinId));
-  if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
+    const checkinId = `${codeData.activityId}_${uid}`;
+    const checkinRef = doc(db(), "activityCheckins", checkinId);
+    const existingSnap = await tx.get(checkinRef);
+    if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
 
-  await setDoc(doc(db(), "activityCheckins", checkinId), {
-    id: checkinId,
-    activityId: codeData.activityId,
-    activityName: codeData.activityName,
-    userId: uid,
-    fullName: profile.fullName,
-    nickname: profile.nickname,
-    classroom: profile.classroom,
-    year: profile.year,
-    studentId: profile.studentId,
-    timestamp: Date.now(),
-    location: { lat: 0, lng: 0 },
-    accuracy: 0,
-    distanceMeters: -1,
-    mapLink: "",
-    locationId: "",
-    method: "emergency_code",
-  });
-
-  await setDoc(codeRef, {
-    ...codeData,
-    used: true,
-    usedBy: uid,
-    usedAt: Date.now(),
+    tx.set(checkinRef, {
+      id: checkinId,
+      activityId: codeData.activityId,
+      activityName: codeData.activityName,
+      userId: uid,
+      fullName: profile.fullName,
+      nickname: profile.nickname,
+      classroom: profile.classroom,
+      year: profile.year,
+      studentId: profile.studentId,
+      timestamp: Date.now(),
+      location: { lat: 0, lng: 0 },
+      accuracy: 0,
+      distanceMeters: -1,
+      mapLink: "",
+      locationId: "",
+      method: "emergency_code",
+    });
+    tx.update(codeRef, {
+      used: true,
+      usedBy: uid,
+      usedAt: Date.now(),
+    });
   });
 }
 
@@ -1397,4 +1448,136 @@ export async function unexemptActivityAttendance(
   await ensureAdminLevel(callerUid);
   const exemptId = `${data.activityId}_${data.studentUid}`;
   await deleteDoc(doc(db(), "activityExemptions", exemptId));
+}
+
+export async function setCharacterEvaluation(
+  callerUid: string,
+  data: { studentUid: string; year: number; evaluated: boolean },
+): Promise<void> {
+  const caller = await loadProfile(callerUid);
+  const target = await loadProfile(data.studentUid);
+  const allowed = ["admin_student", "admin_teacher", "admin", "top_admin"];
+  if (!allowed.includes(caller.role)) throw new Error("ไม่มีสิทธิ์");
+  if (caller.role !== "top_admin" && caller.year !== data.year)
+    throw new Error("ทำได้เฉพาะชั้นปีตัวเอง");
+  if (target.year !== data.year)
+    throw new Error("ชั้นปีของนักเรียนไม่ตรงกับรายการประเมิน");
+  if (!["student", "admin_student"].includes(target.role))
+    throw new Error("ประเมินได้เฉพาะนักเรียน");
+
+  const id = `${data.year}_${data.studentUid}`;
+  await setDoc(doc(db(), "characterEvaluations", id), {
+    id,
+    studentUid: data.studentUid,
+    year: data.year,
+    evaluated: data.evaluated,
+    evaluatedBy: caller.uid,
+    evaluatedByName: caller.fullName || caller.email,
+    evaluatedAt: Date.now(),
+  });
+}
+
+// ============================================================================
+// Backup & Restore
+// ============================================================================
+
+export async function exportAllData(callerUid: string): Promise<{
+  users: any[];
+  checkins: any[];
+  activityCheckins: any[];
+  groups: any[];
+  activities: any[];
+  tasks: any[];
+  activityLogs: any[];
+}> {
+  const caller = await loadProfile(callerUid);
+  if (caller.role !== "top_admin") throw new Error("ไม่มีสิทธิ์");
+
+  const [
+    usersSnap,
+    checkinsSnap,
+    activityCheckinsSnap,
+    groupsSnap,
+    activitiesSnap,
+    tasksSnap,
+    logsSnap,
+  ] = await Promise.all([
+    getDocs(collection(db(), "users")),
+    getDocs(collection(db(), "checkins")),
+    getDocs(collection(db(), "activityCheckins")),
+    getDocs(collection(db(), "groups")),
+    getDocs(collection(db(), "activities")),
+    getDocs(collection(db(), "tasks")),
+    getDocs(collection(db(), "activityLogs")),
+  ]);
+
+  return {
+    users: usersSnap.docs.map((d) => d.data()),
+    checkins: checkinsSnap.docs.map((d) => d.data()),
+    activityCheckins: activityCheckinsSnap.docs.map((d) => d.data()),
+    groups: groupsSnap.docs.map((d) => d.data()),
+    activities: activitiesSnap.docs.map((d) => d.data()),
+    tasks: tasksSnap.docs.map((d) => d.data()),
+    activityLogs: logsSnap.docs.map((d) => d.data()),
+  };
+}
+
+export async function importAllData(
+  callerUid: string,
+  data: {
+    users: any[];
+    checkins: any[];
+    activityCheckins: any[];
+    groups: any[];
+    activities: any[];
+    tasks: any[];
+    activityLogs: any[];
+  },
+): Promise<void> {
+  const caller = await loadProfile(callerUid);
+  if (caller.role !== "top_admin") throw new Error("ไม่มีสิทธิ์");
+
+  // ลบข้อมูลเดิมทั้งหมด
+  const collections = [
+    "users",
+    "checkins",
+    "activityCheckins",
+    "groups",
+    "activities",
+    "tasks",
+    "activityLogs",
+  ];
+
+  for (const coll of collections) {
+    const snap = await getDocs(collection(db(), coll));
+    const batch = writeBatch(db());
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+
+  // นำเข้าข้อมูลใหม่
+  const importBatch = async (collName: string, records: any[]) => {
+    const chunks = [];
+    for (let i = 0; i < records.length; i += 500) {
+      chunks.push(records.slice(i, i + 500));
+    }
+    for (const chunk of chunks) {
+      const batch = writeBatch(db());
+      chunk.forEach((record) => {
+        const docRef = doc(db(), collName, record.id);
+        batch.set(docRef, record);
+      });
+      await batch.commit();
+    }
+  };
+
+  await Promise.all([
+    importBatch("users", data.users),
+    importBatch("checkins", data.checkins),
+    importBatch("activityCheckins", data.activityCheckins),
+    importBatch("groups", data.groups),
+    importBatch("activities", data.activities),
+    importBatch("tasks", data.tasks),
+    importBatch("activityLogs", data.activityLogs),
+  ]);
 }

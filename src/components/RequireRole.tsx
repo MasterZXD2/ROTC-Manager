@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { isProfileComplete } from "@/lib/profile";
 import type { Role } from "@/lib/types";
 import { Loader2 } from "lucide-react";
 
@@ -29,7 +30,7 @@ export function RequireRole({ allow, redirectIfMissing = "/", children }: Props)
     }
     if (
       userDoc.role === "student" &&
-      (!userDoc.fullName || !userDoc.studentId || !userDoc.year)
+      !isProfileComplete(userDoc)
     ) {
       router.replace("/register");
     }

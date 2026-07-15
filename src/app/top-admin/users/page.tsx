@@ -1,21 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, onSnapshot, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { RequireRole } from "@/components/RequireRole";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, FlaskConical, UserPlus, Pencil, Upload } from "lucide-react";
-import { deleteUserAndCheckins, setUserRole, setUserYear, setUserTester, createInviteCode } from "@/lib/actions";
+import { Trash2, FlaskConical, UserPlus, Pencil, Upload, Wrench } from "lucide-react";
+import {
+  deleteUserAndCheckins,
+  setUserRole,
+  setUserYear,
+  setUserTester,
+  setUserTrafficRepair,
+  createInviteCode,
+} from "@/lib/actions";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 import type { UserDoc, Role } from "@/lib/types";
 import { EditUserModal } from "@/components/EditUserModal";
 import { BulkImportModal } from "@/components/BulkImportModal";
+import { UserEvaluationTab } from "@/components/UserEvaluationTab";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
+import { isProfileComplete } from "@/lib/profile";
 
 function UsersInner() {
   const { userDoc: me } = useAuth();
@@ -23,11 +32,15 @@ function UsersInner() {
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<string>("");
+  const [profileFilter, setProfileFilter] = useState<"all" | "incomplete">("all");
+  const [sortMode, setSortMode] = useState<"name" | "classroom">("name");
+  const [evaluationYearFilter, setEvaluationYearFilter] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [invCode, setInvCode] = useState<{ value: string; expiresAt: number } | null>(null);
   const [busyInv, setBusyInv] = useState(false);
   const [editing, setEditing] = useState<UserDoc | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [subTab, setSubTab] = useState<"manage" | "evaluation">("manage");
 
   const newInvCode = async () => {
     if (!me) return;
@@ -42,9 +55,15 @@ function UsersInner() {
   };
 
   useEffect(() => {
-    const q = query(collection(db(), "users"), orderBy("fullName"));
+    const q = query(collection(db(), "users"));
     const unsub = onSnapshot(q, (snap) =>
-      setUsers(snap.docs.map((d) => d.data() as UserDoc)),
+      setUsers(
+        snap.docs
+          .map((d) => d.data() as UserDoc)
+          .sort((a, b) =>
+            (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"),
+          ),
+      ),
     );
     return () => unsub();
   }, []);
@@ -53,12 +72,21 @@ function UsersInner() {
     const s = search.trim().toLowerCase();
     return users.filter((u) => {
       if (yearFilter && String(u.year) !== yearFilter) return false;
+      if (profileFilter === "incomplete" && isProfileComplete(u)) return false;
       if (!s) return true;
-      return [u.fullName, u.nickname, u.studentId, u.email, u.classroom]
+      return [u.fullName, u.nickname, u.studentId, u.email, u.classroom, u.uid]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(s));
+    }).sort((a, b) => {
+      const nameA = a.fullName || a.email || a.uid;
+      const nameB = b.fullName || b.email || b.uid;
+      if (sortMode === "classroom") {
+        return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
+          || nameA.localeCompare(nameB, "th", { numeric: true });
+      }
+      return nameA.localeCompare(nameB, "th", { numeric: true });
     });
-  }, [users, search, yearFilter]);
+  }, [users, search, yearFilter, profileFilter, sortMode]);
 
   const changeRole = async (uid: string, role: Role) => {
     if (!me) return;
@@ -93,6 +121,17 @@ function UsersInner() {
     } finally { setBusy(null); }
   };
 
+  const toggleTrafficRepair = async (uid: string, current: boolean) => {
+    if (!me) return;
+    setBusy(uid);
+    try {
+      await setUserTrafficRepair(me.uid, uid, !current);
+      toast.success(current ? "ปิดสถานะกำลังซ่อมแล้ว" : "เปิดสถานะกำลังซ่อมแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ");
+    } finally { setBusy(null); }
+  };
+
   const del = async (uid: string, name: string) => {
     if (!me) return;
     const ok = await confirm({
@@ -115,58 +154,98 @@ function UsersInner() {
     <main className="mx-auto max-w-4xl p-4">
       <Nav />
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-bold">ผู้ใช้ทั้งหมด ({filtered.length})</h1>
-        <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
-          <Upload className="mr-1 h-4 w-4" />นำเข้านักเรียน
+        <h1 className="text-xl font-bold">
+          {subTab === "manage" ? `ผู้ใช้ทั้งหมด (${filtered.length})` : "ผลประเมินผู้ใช้"}
+        </h1>
+        {subTab === "manage" && (
+          <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+            <Upload className="mr-1 h-4 w-4" />นำเข้านักเรียน
+          </Button>
+        )}
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant={subTab === "manage" ? "default" : "outline"}
+          onClick={() => setSubTab("manage")}
+        >
+          จัดการข้อมูล
+        </Button>
+        <Button
+          size="sm"
+          variant={subTab === "evaluation" ? "default" : "outline"}
+          onClick={() => setSubTab("evaluation")}
+        >
+          ผลประเมิน
         </Button>
       </div>
 
-      <Card className="mb-4 border-blue-300">
-        <CardContent className="pt-4">
-          <div className="mb-1 text-sm font-semibold text-blue-700">รหัสเชิญสำหรับ Login (ทุกชั้นปี)</div>
-          <p className="mb-3 text-xs text-muted-foreground">
-            รหัสจาก Top Admin — นักเรียนใหม่กรอกตอนสมัคร เลือกชั้นปีเองได้
-          </p>
-          {invCode ? (
-            <div className="space-y-1">
-              <div className="text-3xl font-bold tracking-widest text-blue-700">{invCode.value}</div>
-              <p className="text-xs text-muted-foreground">
-                หมดอายุ {new Date(invCode.expiresAt).toLocaleTimeString("th-TH", {
-                  timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit",
-                })}
+      {subTab === "manage" ? (
+        <>
+          <Card className="mb-4 border-blue-300">
+            <CardContent className="pt-4">
+              <div className="mb-1 text-sm font-semibold text-blue-700">รหัสเชิญสำหรับ Login (ทุกชั้นปี)</div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                รหัสจาก Top Admin — นักเรียนใหม่กรอกตอนสมัคร เลือกชั้นปีเองได้
               </p>
-              <Button variant="outline" size="sm" onClick={newInvCode} disabled={busyInv}>สร้างใหม่</Button>
-            </div>
-          ) : (
-            <Button onClick={newInvCode} disabled={busyInv}>
-              <UserPlus className="mr-2 h-4 w-4" />สร้างรหัสเชิญ (5 นาที · ใช้ได้ทุกชั้นปี)
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+              {invCode ? (
+                <div className="space-y-1">
+                  <div className="text-3xl font-bold tracking-widest text-blue-700">{invCode.value}</div>
+                  <p className="text-xs text-muted-foreground">
+                    หมดอายุ {new Date(invCode.expiresAt).toLocaleTimeString("th-TH", {
+                      timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                    })}
+                  </p>
+                  <Button variant="outline" size="sm" onClick={newInvCode} disabled={busyInv}>สร้างใหม่</Button>
+                </div>
+              ) : (
+                <Button onClick={newInvCode} disabled={busyInv}>
+                  <UserPlus className="mr-2 h-4 w-4" />สร้างรหัสเชิญ (5 นาที · ใช้ได้ทุกชั้นปี)
+                </Button>
+              )}
+            </CardContent>
+          </Card>
 
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Input
-          placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส นร."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        <select
-          value={yearFilter}
-          onChange={(e) => setYearFilter(e.target.value)}
-          className="h-11 rounded-lg border px-3"
-        >
-          <option value="">ทุกชั้นปี</option>
-          {[1, 2, 3, 4, 5].map((y) => (
-            <option key={y} value={y}>ปี {y}</option>
-          ))}
-        </select>
-      </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Input
+              placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส นร."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-xs"
+            />
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as "name" | "classroom")}
+              className="h-11 rounded-lg border bg-background px-3"
+              aria-label="เรียงผู้ใช้"
+            >
+              <option value="name">เรียงตามลำดับตัวอักษร</option>
+              <option value="classroom">เรียงตามห้อง</option>
+            </select>
+            <select
+              value={yearFilter}
+              onChange={(e) => setYearFilter(e.target.value)}
+              className="h-11 rounded-lg border px-3"
+            >
+              <option value="">ทุกชั้นปี</option>
+              {[1, 2, 3, 4, 5].map((y) => (
+                <option key={y} value={y}>ปี {y}</option>
+              ))}
+            </select>
+            <select
+              value={profileFilter}
+              onChange={(e) => setProfileFilter(e.target.value as "all" | "incomplete")}
+              className="h-11 rounded-lg border px-3"
+            >
+              <option value="all">ทุกสถานะข้อมูล</option>
+              <option value="incomplete">ข้อมูลไม่ครบ</option>
+            </select>
+          </div>
 
-      <Card>
-        <CardContent className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
+          <Card>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full text-sm">
             <thead className="text-left text-xs text-muted-foreground">
               <tr className="border-b">
                 <th className="px-3 py-2">ชื่อ</th>
@@ -175,6 +254,7 @@ function UsersInner() {
                 <th className="px-3 py-2">รหัส นร.</th>
                 <th className="px-3 py-2">สิทธิ์</th>
                 <th className="px-3 py-2">Tester</th>
+                <th className="px-3 py-2">ซ่อม</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -184,6 +264,12 @@ function UsersInner() {
                   <td className="px-3 py-2">
                     <div>{u.fullName || u.email}</div>
                     {u.nickname && <div className="text-xs text-muted-foreground">{u.nickname}</div>}
+                    <div className="font-mono text-xs text-muted-foreground" title={u.uid}>
+                      UID: {u.uid.slice(0, 8)}...
+                    </div>
+                    {!isProfileComplete(u) && (
+                      <div className="mt-1 text-xs font-medium text-amber-700">ข้อมูลไม่ครบ</div>
+                    )}
                   </td>
                   <td className="px-3 py-2">{u.classroom || "—"}</td>
                   <td className="px-3 py-2">
@@ -226,6 +312,19 @@ function UsersInner() {
                       {u.isTester ? "เปิด" : "ปิด"}
                     </Button>
                   </td>
+                  <td className="px-3 py-2">
+                    <Button
+                      variant={u.isTrafficRepair ? "default" : "outline"}
+                      size="sm"
+                      disabled={busy === u.uid}
+                      onClick={() => toggleTrafficRepair(u.uid, !!u.isTrafficRepair)}
+                      className="h-8"
+                      title="กำลังซ่อม: เช็คอินจราจรได้โดยไม่ต้องเป็นกลุ่มเวรวันนี้ แต่ยังต้องอยู่ในเวลา/ระยะ/GPS"
+                    >
+                      <Wrench className="mr-1 h-3 w-3" />
+                      {u.isTrafficRepair ? "เปิด" : "ปิด"}
+                    </Button>
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <Button
                       variant="ghost" size="icon"
@@ -247,9 +346,30 @@ function UsersInner() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </CardContent>
-      </Card>
+              </table>
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <select
+              value={evaluationYearFilter}
+              onChange={(e) => setEvaluationYearFilter(e.target.value)}
+              className="h-11 rounded-lg border px-3"
+            >
+              <option value="">ทุกชั้นปี</option>
+              {[1, 2, 3, 4, 5].map((y) => (
+                <option key={y} value={y}>ปี {y}</option>
+              ))}
+            </select>
+          </div>
+          <UserEvaluationTab
+            callerUid={me?.uid ?? ""}
+            yearScope={evaluationYearFilter ? Number(evaluationYearFilter) : null}
+          />
+        </>
+      )}
 
       {editing && me && (
         <EditUserModal

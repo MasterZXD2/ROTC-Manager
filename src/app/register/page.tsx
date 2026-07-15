@@ -13,6 +13,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, KeyRound, Sparkles } from "lucide-react";
 import { redeemInviteCode, lookupPendingStudent } from "@/lib/actions";
+import { isProfileComplete } from "@/lib/profile";
 import type { GlobalConfig } from "@/lib/types";
 import { toast } from "sonner";
 
@@ -65,7 +66,7 @@ export default function RegisterPage() {
       router.replace(dest);
       return;
     }
-    if (userDoc?.fullName && userDoc.studentId && userDoc.year) {
+    if (isProfileComplete(userDoc)) {
       router.replace("/student/checkin");
     }
   }, [loading, fbUser, userDoc, router]);

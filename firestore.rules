@@ -55,6 +55,7 @@ service cloud.firestore {
           && request.resource.data.email == resource.data.email
           && request.resource.data.role == resource.data.role
           && (request.resource.data.get("isTester", false) == resource.data.get("isTester", false))
+          && (request.resource.data.get("isTrafficRepair", false) == resource.data.get("isTrafficRepair", false))
           && request.resource.data.year is int
           && request.resource.data.year >= 0
           && request.resource.data.year <= 5)
@@ -169,7 +170,8 @@ service cloud.firestore {
         && request.resource.data.year == resource.data.year
         && request.time.toMillis() <= resource.data.expiresAt;
 
-      allow delete: if isTopAdmin();
+      allow delete: if isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear());
     }
 
     // ===== inviteCodes/{code} — รหัส login ตอน register (ใช้ได้หลายคนจนกว่าจะหมดเวลา) =====
@@ -427,11 +429,9 @@ service cloud.firestore {
 
     // ===== activityCheckins/{checkinId} — การเช็คอินกิจกรรม =====
     match /activityCheckins/{checkinId} {
-      allow get: if isSignedIn() && (
-        resource.data.userId == request.auth.uid
-        || isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear())
-      );
+      // การเช็คอินใช้ transaction อ่าน doc id `${activityId}_${uid}` ก่อนสร้าง
+      // จึงต้องอนุญาต get แม้เอกสารยังไม่มีอยู่ (resource.data ใช้ตรวจไม่ได้ในกรณีนี้)
+      allow get: if isSignedIn();
       allow list: if isSignedIn();
 
       allow create: if isSignedIn()
@@ -461,7 +461,8 @@ service cloud.firestore {
         && request.resource.data.usedBy == request.auth.uid
         && request.time.toMillis() <= resource.data.expiresAt;
 
-      allow delete: if isTopAdmin();
+      allow delete: if isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear());
     }
 
     // ===== activityExemptions/{exemptionId} — ยกเว้นกิจกรรม =====
@@ -475,6 +476,25 @@ service cloud.firestore {
         && (
           isTopAdmin()
           || (isAnyAdmin() && request.resource.data.year == myYear())
+        );
+
+      allow delete: if isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear());
+    }
+
+    // ===== characterEvaluations/{year_uid} — วัดผลคุณลักษณะรายคน =====
+    match /characterEvaluations/{evaluationId} {
+      allow read: if isSignedIn();
+
+      allow create, update: if isAnyAdmin()
+        && request.resource.data.id == evaluationId
+        && request.resource.data.studentUid is string
+        && request.resource.data.year is int
+        && request.resource.data.evaluated is bool
+        && request.resource.data.evaluatedBy == request.auth.uid
+        && (
+          isTopAdmin()
+          || request.resource.data.year == myYear()
         );
 
       allow delete: if isTopAdmin()

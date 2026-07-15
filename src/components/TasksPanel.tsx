@@ -13,8 +13,7 @@ import { useReviewFlow } from "@/components/ReviewBeforePrompt";
 import type { EditorPayload } from "@/lib/editor-bus";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
-import type { TaskDoc, TaskCompletionDoc, UserDoc, YearConfigDoc } from "@/lib/types";
-import { DEFAULT_PASSING_PERCENT } from "@/lib/types";
+import type { TaskDoc, TaskCompletionDoc, UserDoc } from "@/lib/types";
 
 interface Props {
   callerUid: string;
@@ -27,7 +26,6 @@ export function TasksPanel({ callerUid, year }: Props) {
   const [completions, setCompletions] = useState<TaskCompletionDoc[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [search, setSearch] = useState("");
-  const [passingPercent, setPassingPercent] = useState(DEFAULT_PASSING_PERCENT);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
@@ -36,18 +34,6 @@ export function TasksPanel({ callerUid, year }: Props) {
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
-
-  useEffect(() => {
-    const ref = doc(db(), "yearConfigs", `year${year}`);
-    return onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        const cfg = snap.data() as YearConfigDoc;
-        setPassingPercent(cfg.passingPercent ?? DEFAULT_PASSING_PERCENT);
-      } else {
-        setPassingPercent(DEFAULT_PASSING_PERCENT);
-      }
-    });
-  }, [year]);
 
   useEffect(() => {
     const q = query(collection(db(), "tasks"), where("year", "==", year), orderBy("order"));
@@ -152,7 +138,6 @@ export function TasksPanel({ callerUid, year }: Props) {
               tasks={tasks}
               isDone={isDone}
               onToggle={toggle}
-              passingPercent={passingPercent}
             />
           ) : (
             <DesktopTable
@@ -161,7 +146,6 @@ export function TasksPanel({ callerUid, year }: Props) {
               tasks={tasks}
               isDone={isDone}
               onToggle={toggle}
-              passingPercent={passingPercent}
             />
           )}
         </>
@@ -283,14 +267,13 @@ function TaskHeader({
 }
 
 function DesktopTable({
-  callerUid, students, tasks, isDone, onToggle, passingPercent,
+  callerUid, students, tasks, isDone, onToggle,
 }: {
   callerUid: string;
   students: UserDoc[];
   tasks: TaskDoc[];
   isDone: (t: string, s: string) => boolean;
   onToggle: (t: TaskDoc, s: UserDoc) => void;
-  passingPercent: number;
 }) {
   const confirm = useConfirm();
   const onDelTask = async (t: TaskDoc) => {
@@ -334,24 +317,10 @@ function DesktopTable({
           </thead>
           <tbody>
             {students.map((s) => {
-              const doneCount = tasks.filter((t) => isDone(t.id, s.uid)).length;
-              const pct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
-              const passed = pct >= passingPercent;
               return (
                 <tr key={s.uid} className="border-b last:border-0">
                   <td className="sticky left-0 bg-background px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span>
-                        {s.fullName} <span className="text-xs text-muted-foreground">({s.nickname})</span>
-                      </span>
-                      <div
-                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
-                          passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {pct}%
-                      </div>
-                    </div>
+                    {s.fullName} <span className="text-xs text-muted-foreground">({s.nickname})</span>
                   </td>
                   {tasks.map((t) => {
                     const done = isDone(t.id, s.uid);
@@ -381,13 +350,12 @@ function DesktopTable({
 }
 
 function MobileView({
-  students, tasks, isDone, onToggle, passingPercent,
+  students, tasks, isDone, onToggle,
 }: {
   students: UserDoc[];
   tasks: TaskDoc[];
   isDone: (t: string, s: string) => boolean;
   onToggle: (t: TaskDoc, s: UserDoc) => void;
-  passingPercent: number;
 }) {
   const [picked, setPicked] = useState<UserDoc | null>(null);
 
@@ -442,8 +410,6 @@ function MobileView({
         <ul className="divide-y">
           {students.map((s) => {
             const doneCount = tasks.filter((t) => isDone(t.id, s.uid)).length;
-            const pct = tasks.length > 0 ? Math.round((doneCount / tasks.length) * 100) : 0;
-            const passed = pct >= passingPercent;
             return (
               <li key={s.uid}>
                 <button
@@ -454,12 +420,8 @@ function MobileView({
                     <div className="font-medium">{s.fullName}</div>
                     <div className="text-xs text-muted-foreground">{s.classroom}</div>
                   </div>
-                  <div
-                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
-                      passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-                    }`}
-                  >
-                    {pct}%
+                  <div className="shrink-0 text-xs text-muted-foreground">
+                    {doneCount}/{tasks.length} งาน
                   </div>
                 </button>
               </li>

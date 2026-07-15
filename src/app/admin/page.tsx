@@ -17,9 +17,12 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { AdminGroupsTab } from "@/components/AdminGroupsTab";
 import { AdminTasksTab } from "@/components/AdminTasksTab";
+import { UserEvaluationTab } from "@/components/UserEvaluationTab";
+import { AttendanceStats } from "@/components/AttendanceStats";
 
 type Range = "today" | "week" | "month";
 type Tab = "checkins" | "users" | "groups" | "tasks";
+type UsersSubTab = "manage" | "evaluation";
 
 function rangeStart(r: Range): number {
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -40,6 +43,7 @@ function AdminInner() {
   const [code, setCode] = useState<{ value: string; expiresAt: number } | null>(null);
   const [busyCode, setBusyCode] = useState(false);
   const [tab, setTab] = useState<Tab>("checkins");
+  const [usersSubTab, setUsersSubTab] = useState<UsersSubTab>("manage");
 
   const isTeacher = userDoc?.role === "admin_teacher" || userDoc?.role === "admin";
 
@@ -235,10 +239,38 @@ function AdminInner() {
               </Card>
             ))}
           </div>
+
+          <div className="mt-4">
+            <AttendanceStats year={userDoc!.year} callerUid={userDoc!.uid} />
+          </div>
         </>
       )}
 
-      {tab === "users" && <UsersInYear year={userDoc!.year} callerUid={userDoc!.uid} />}
+      {tab === "users" && userDoc && (
+        <>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant={usersSubTab === "manage" ? "default" : "outline"}
+              onClick={() => setUsersSubTab("manage")}
+            >
+              จัดการข้อมูล
+            </Button>
+            <Button
+              size="sm"
+              variant={usersSubTab === "evaluation" ? "default" : "outline"}
+              onClick={() => setUsersSubTab("evaluation")}
+            >
+              ผลประเมิน
+            </Button>
+          </div>
+          {usersSubTab === "manage" ? (
+            <UsersInYear year={userDoc.year} callerUid={userDoc.uid} />
+          ) : (
+            <UserEvaluationTab callerUid={userDoc.uid} yearScope={userDoc.year} />
+          )}
+        </>
+      )}
       {tab === "groups" && <AdminGroupsTab userDoc={userDoc!} isTeacher={isTeacher} />}
       {tab === "tasks" && <AdminTasksTab userDoc={userDoc!} />}
     </main>
@@ -250,6 +282,7 @@ function UsersInYear({ year, callerUid }: { year: number; callerUid: string }) {
   const [users, setUsers] = useState<Array<{
     uid: string; fullName: string; nickname: string; classroom: string; studentId: string; role: string;
   }>>([]);
+  const [sortMode, setSortMode] = useState<"name" | "classroom">("name");
 
   useEffect(() => {
     const q = query(
@@ -279,9 +312,29 @@ function UsersInYear({ year, callerUid }: { year: number; callerUid: string }) {
     }
   };
 
+  const sortedUsers = useMemo(() => [...users].sort((a, b) => {
+    if (sortMode === "classroom") {
+      return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
+        || (a.fullName || "").localeCompare(b.fullName || "", "th", { numeric: true });
+    }
+    return (a.fullName || "").localeCompare(b.fullName || "", "th", { numeric: true });
+  }), [users, sortMode]);
+
   return (
-    <Card>
-      <CardContent className="overflow-x-auto p-0">
+    <>
+      <div className="mb-3">
+        <select
+          value={sortMode}
+          onChange={(e) => setSortMode(e.target.value as "name" | "classroom")}
+          className="h-10 rounded-lg border bg-background px-3 text-sm"
+          aria-label="เรียงผู้ใช้"
+        >
+          <option value="name">เรียงตามลำดับตัวอักษร</option>
+          <option value="classroom">เรียงตามห้อง</option>
+        </select>
+      </div>
+      <Card>
+        <CardContent className="overflow-x-auto p-0">
         <table className="w-full text-sm">
           <thead className="text-left text-xs text-muted-foreground">
             <tr className="border-b">
@@ -292,7 +345,7 @@ function UsersInYear({ year, callerUid }: { year: number; callerUid: string }) {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {sortedUsers.map((u) => (
               <tr key={u.uid} className="border-b last:border-0">
                 <td className="px-3 py-2">
                   {u.fullName} <span className="text-muted-foreground">({u.nickname})</span>
@@ -313,8 +366,9 @@ function UsersInYear({ year, callerUid }: { year: number; callerUid: string }) {
             ))}
           </tbody>
         </table>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </>
   );
 }
 

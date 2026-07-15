@@ -5,8 +5,8 @@ import { collection, onSnapshot, orderBy, query, where, limit } from "firebase/f
 import { db } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import type { CheckinDoc, DutyLogDoc, GroupDoc, AttendanceExemptionDoc } from "@/lib/types";
-import { CheckCircle2, XCircle, UserCheck, Clock } from "lucide-react";
+import type { CheckinDoc, DutyLogDoc, GroupDoc, AttendanceExemptionDoc, UserDoc } from "@/lib/types";
+import { CheckCircle2, XCircle, UserCheck, Clock, Wrench } from "lucide-react";
 import { exemptAttendance, unexemptAttendance } from "@/lib/actions";
 import { toast } from "sonner";
 
@@ -56,6 +56,7 @@ export function AttendanceStats({ year, callerUid }: Props) {
   const [dutyLogs, setDutyLogs] = useState<DutyLogDoc[]>([]);
   const [checkins, setCheckins] = useState<CheckinDoc[]>([]);
   const [exemptions, setExemptions] = useState<AttendanceExemptionDoc[]>([]);
+  const [users, setUsers] = useState<UserDoc[]>([]);
 
   const todayKey = dayKeyOf(Date.now());
 
@@ -63,6 +64,12 @@ export function AttendanceStats({ year, callerUid }: Props) {
     const base = collection(db(), "groups");
     const q = year === null ? query(base) : query(base, where("year", "==", year));
     return onSnapshot(q, (s) => setGroups(s.docs.map((d) => d.data() as GroupDoc)));
+  }, [year]);
+
+  useEffect(() => {
+    const base = collection(db(), "users");
+    const q = year === null ? query(base) : query(base, where("year", "==", year));
+    return onSnapshot(q, (s) => setUsers(s.docs.map((d) => d.data() as UserDoc)));
   }, [year]);
 
   useEffect(() => {
@@ -137,6 +144,59 @@ export function AttendanceStats({ year, callerUid }: Props) {
     });
   };
 
+  const repairMembersByYear = useMemo(() => {
+    const byYear = new Map<number, Map<string, MemberRow>>();
+    const rounds = roundsByDayUid.get(todayKey) ?? new Map<string, number>();
+    const exempted = exemptedByDay.get(todayKey) ?? new Set<string>();
+
+    const add = (member: {
+      uid: string;
+      fullName: string;
+      nickname: string;
+      classroom: string;
+      year: number;
+    }) => {
+      if (member.year < 1 || member.year > 5) return;
+      if (!byYear.has(member.year)) byYear.set(member.year, new Map());
+      const memberRounds = rounds.get(member.uid) ?? 0;
+      const isExempted = exempted.has(member.uid);
+      byYear.get(member.year)!.set(member.uid, {
+        uid: member.uid,
+        fullName: member.fullName,
+        nickname: member.nickname,
+        classroom: member.classroom,
+        rounds: memberRounds,
+        exempted: isExempted,
+        present: isExempted || memberRounds >= REQUIRED_ROUNDS,
+      });
+    };
+
+    for (const user of users) {
+      if (user.isTrafficRepair) add(user);
+    }
+    for (const checkin of checkins) {
+      if (checkin.trafficRepair && dayKeyOf(checkin.timestamp) === todayKey) {
+        add({
+          uid: checkin.userId,
+          fullName: checkin.fullName,
+          nickname: checkin.nickname,
+          classroom: checkin.classroom,
+          year: checkin.year,
+        });
+      }
+    }
+
+    return new Map(
+      Array.from(byYear.entries()).map(([yr, members]) => [
+        yr,
+        Array.from(members.values()).sort((a, b) =>
+          a.classroom.localeCompare(b.classroom, "th", { numeric: true })
+          || a.fullName.localeCompare(b.fullName, "th"),
+        ),
+      ]),
+    );
+  }, [users, checkins, roundsByDayUid, exemptedByDay, todayKey]);
+
   // จราจรปัจจุบัน + ต่อไป ต่อชั้นปี (กลุ่มที่ยังไม่ติ๊ก เรียงตาม order??number)
   const dutyByYear = useMemo(() => {
     const byYear = new Map<number, GroupDoc[]>();
@@ -144,15 +204,27 @@ export function AttendanceStats({ year, callerUid }: Props) {
       if (!byYear.has(g.year)) byYear.set(g.year, []);
       byYear.get(g.year)!.push(g);
     }
-    const rows: { current: GroupDoc | null; next: GroupDoc | null; year: number }[] = [];
-    for (const [yr, list] of byYear.entries()) {
+    const years = new Set([...byYear.keys(), ...repairMembersByYear.keys()]);
+    const rows: {
+      current: GroupDoc | null;
+      next: GroupDoc | null;
+      year: number;
+      repairMembers: MemberRow[];
+    }[] = [];
+    for (const yr of years) {
+      const list = byYear.get(yr) ?? [];
       const pending = [...list]
         .filter((g) => !g.checkStatus)
         .sort((a, b) => (a.order ?? a.number) - (b.order ?? b.number));
-      rows.push({ year: yr, current: pending[0] ?? null, next: pending[1] ?? null });
+      rows.push({
+        year: yr,
+        current: pending[0] ?? null,
+        next: pending[1] ?? null,
+        repairMembers: repairMembersByYear.get(yr) ?? [],
+      });
     }
     return rows.sort((a, b) => a.year - b.year);
-  }, [groups]);
+  }, [groups, repairMembersByYear]);
 
   const onExempt = async (m: MemberRow, ctx: { year: number; dayKey: string }) => {
     try {
@@ -174,7 +246,7 @@ export function AttendanceStats({ year, callerUid }: Props) {
     }
   };
 
-  if (groups.length === 0 && dutyLogs.length === 0) {
+  if (groups.length === 0 && dutyLogs.length === 0 && repairMembersByYear.size === 0) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -186,7 +258,7 @@ export function AttendanceStats({ year, callerUid }: Props) {
 
   return (
     <div className="space-y-3">
-      {dutyByYear.map(({ current, next, year: yr }) => (
+      {dutyByYear.map(({ current, next, year: yr, repairMembers }) => (
         <div key={`duty-${yr}`} className="space-y-3">
           {current && (
             <CurrentDutyCard
@@ -194,6 +266,15 @@ export function AttendanceStats({ year, callerUid }: Props) {
               members={computeMembers(current.members, todayKey)}
               showYear={year === null}
               onExempt={(m) => onExempt(m, { year: current.year, dayKey: todayKey })}
+              onUnexempt={(m) => onUnexempt(m, todayKey)}
+            />
+          )}
+          {repairMembers.length > 0 && (
+            <RepairDutyCard
+              members={repairMembers}
+              year={yr}
+              showYear={year === null}
+              onExempt={(m) => onExempt(m, { year: yr, dayKey: todayKey })}
               onUnexempt={(m) => onUnexempt(m, todayKey)}
             />
           )}
@@ -260,6 +341,40 @@ function CurrentDutyCard({
           </span>
         </CardTitle>
         <p className="text-xs text-muted-foreground">กลุ่มที่ต้องทำเวรวันนี้ — ติ๊กในแถบ &quot;กลุ่มจราจร&quot; เมื่อยืนยัน</p>
+      </CardHeader>
+      <CardContent>
+        <MemberList members={members} onExempt={onExempt} onUnexempt={onUnexempt} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ---------- การ์ดผู้มีสถานะซ่อมเวรวันนี้ ---------- */
+function RepairDutyCard({
+  members, year, showYear, onExempt, onUnexempt,
+}: {
+  members: MemberRow[];
+  year: number;
+  showYear: boolean;
+  onExempt: (m: MemberRow) => void;
+  onUnexempt: (m: MemberRow) => void;
+}) {
+  const completedCount = members.filter((member) => member.present).length;
+  return (
+    <Card className="border-amber-400 bg-amber-50/40 dark:bg-amber-950/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center justify-between text-base">
+          <span className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+            ซ่อมเวร
+            {showYear && (
+              <span className="text-xs font-normal text-muted-foreground">· ปี {year}</span>
+            )}
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            ครบ {completedCount}/{members.length} คน
+          </span>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <MemberList members={members} onExempt={onExempt} onUnexempt={onUnexempt} />
