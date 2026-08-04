@@ -136,6 +136,7 @@ export function UserEvaluationTab({ callerUid, users, yearScope = null }: Props)
 
     const activitiesByYear = new Map<number, ActivityDoc[]>();
     for (const activity of activities) {
+      if (activity.type === "external") continue;
       if (!activitiesByYear.has(activity.year)) activitiesByYear.set(activity.year, []);
       activitiesByYear.get(activity.year)!.push(activity);
     }
