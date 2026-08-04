@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Download, Upload, Loader2, AlertTriangle, FileSpreadsheet } from "lucide-react";
 import { exportAllData, importAllData } from "@/lib/actions";
-import { downloadXlsx } from "@/lib/exports";
+import { downloadXlsx, addJsonSheet } from "@/lib/exports";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
 import type { UserDoc } from "@/lib/types";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
   const confirm = useConfirm();
@@ -33,37 +33,27 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
         minute: "2-digit",
       }).replace(/\//g, "-").replace(/,/g, "").replace(/:/g, "").replace(/ /g, "-");
 
-      const wb = XLSX.utils.book_new();
+      const wb = new ExcelJS.Workbook();
+      addJsonSheet(wb, "Users", data.users);
+      addJsonSheet(wb, "Checkins", data.checkins);
+      addJsonSheet(wb, "ActivityCheckins", data.activityCheckins);
+      addJsonSheet(wb, "Groups", data.groups);
+      addJsonSheet(wb, "Activities", data.activities);
+      addJsonSheet(wb, "Tasks", data.tasks);
+      addJsonSheet(wb, "ActivityLogs", data.activityLogs);
 
-      // Users
-      const usersSheet = XLSX.utils.json_to_sheet(data.users);
-      XLSX.utils.book_append_sheet(wb, usersSheet, "Users");
-
-      // Checkins
-      const checkinsSheet = XLSX.utils.json_to_sheet(data.checkins);
-      XLSX.utils.book_append_sheet(wb, checkinsSheet, "Checkins");
-
-      // Activity Checkins
-      const activityCheckinsSheet = XLSX.utils.json_to_sheet(data.activityCheckins);
-      XLSX.utils.book_append_sheet(wb, activityCheckinsSheet, "ActivityCheckins");
-
-      // Groups
-      const groupsSheet = XLSX.utils.json_to_sheet(data.groups);
-      XLSX.utils.book_append_sheet(wb, groupsSheet, "Groups");
-
-      // Activities
-      const activitiesSheet = XLSX.utils.json_to_sheet(data.activities);
-      XLSX.utils.book_append_sheet(wb, activitiesSheet, "Activities");
-
-      // Tasks
-      const tasksSheet = XLSX.utils.json_to_sheet(data.tasks);
-      XLSX.utils.book_append_sheet(wb, tasksSheet, "Tasks");
-
-      // Activity Logs
-      const logsSheet = XLSX.utils.json_to_sheet(data.activityLogs);
-      XLSX.utils.book_append_sheet(wb, logsSheet, "ActivityLogs");
-
-      XLSX.writeFile(wb, `ROTC-Backup-${timestamp}.xlsx`);
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ROTC-Backup-${timestamp}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
       toast.success("Export สำเร็จ!");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Export ไม่สำเร็จ");
@@ -78,16 +68,38 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const wb = XLSX.read(arrayBuffer);
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(arrayBuffer);
+
+      const readSheet = (name: string) => {
+        const ws = wb.getWorksheet(name);
+        if (!ws) return [];
+        const headers: string[] = [];
+        const rows: Record<string, unknown>[] = [];
+        let firstRow = true;
+        ws.eachRow((row) => {
+          if (firstRow) {
+            firstRow = false;
+            row.eachCell({ includeEmpty: true }, (cell, col) => {
+              headers[col] = String(cell.value ?? "");
+            });
+            return;
+          }
+          const obj: Record<string, unknown> = {};
+          headers.forEach((h, col) => { if (h) obj[h] = row.getCell(col).value ?? ""; });
+          rows.push(obj);
+        });
+        return rows;
+      };
 
       const data = {
-        users: XLSX.utils.sheet_to_json(wb.Sheets["Users"] || {}, { defval: "" }),
-        checkins: XLSX.utils.sheet_to_json(wb.Sheets["Checkins"] || {}, { defval: "" }),
-        activityCheckins: XLSX.utils.sheet_to_json(wb.Sheets["ActivityCheckins"] || {}, { defval: "" }),
-        groups: XLSX.utils.sheet_to_json(wb.Sheets["Groups"] || {}, { defval: "" }),
-        activities: XLSX.utils.sheet_to_json(wb.Sheets["Activities"] || {}, { defval: "" }),
-        tasks: XLSX.utils.sheet_to_json(wb.Sheets["Tasks"] || {}, { defval: "" }),
-        activityLogs: XLSX.utils.sheet_to_json(wb.Sheets["ActivityLogs"] || {}, { defval: "" }),
+        users: readSheet("Users"),
+        checkins: readSheet("Checkins"),
+        activityCheckins: readSheet("ActivityCheckins"),
+        groups: readSheet("Groups"),
+        activities: readSheet("Activities"),
+        tasks: readSheet("Tasks"),
+        activityLogs: readSheet("ActivityLogs"),
       };
 
       setFileData(data);

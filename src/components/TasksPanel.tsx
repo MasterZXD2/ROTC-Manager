@@ -199,8 +199,8 @@ function TaskHeader({
     const filename = `งาน-ปี${year}-${todayStamp()}`;
     const sheetName = `งานปี${year}`;
 
-    const doDownload = () => {
-      downloadXlsx(filename, [{ name: sheetName, headers, rows, colWidths }]);
+    const doDownload = async () => {
+      await downloadXlsx(filename, [{ name: sheetName, headers, rows, colWidths }]);
       toast.success("ดาวน์โหลด Excel แล้ว");
     };
 

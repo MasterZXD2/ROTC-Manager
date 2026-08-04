@@ -158,7 +158,7 @@ function EditorInner() {
           if (typeof v === "string" || typeof v === "number") return v;
           return v == null ? "" : String(v);
         }));
-        downloadXlsx(ctx.filename, [{
+        await downloadXlsx(ctx.filename, [{
           name: ctx.sheetName || "ข้อมูล",
           headers,
           rows: data,

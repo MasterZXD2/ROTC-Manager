@@ -38,7 +38,9 @@ function findNearest(locs: GlobalConfig["locations"], pos: { lat: number; lng: n
 }
 
 function genCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return String(arr[0] % 900000 + 100000);
 }
 
 async function logActivity(
@@ -519,7 +521,16 @@ export async function deleteUserAndCheckins(
     await batch.commit();
   }
 
-  // ลบ user doc สุดท้าย — Auth user ต้องลบ manual ที่ Firebase Console
+  // บันทึก UID ที่ถูกลบ — ป้องกัน login กลับเข้ามาใหม่ (Firebase Auth account ยังคงอยู่
+  // เนื่องจาก free plan ไม่มี Admin SDK สำหรับลบ Auth user)
+  await setDoc(doc(db(), "blockedUsers", targetUid), {
+    uid: targetUid,
+    email: target.email,
+    blockedAt: Date.now(),
+    blockedBy: callerUid,
+  });
+
+  // ลบ user doc สุดท้าย
   await deleteDoc(doc(db(), "users", targetUid));
 
   // log activity
@@ -1537,47 +1548,40 @@ export async function importAllData(
   const caller = await loadProfile(callerUid);
   if (caller.role !== "top_admin") throw new Error("ไม่มีสิทธิ์");
 
-  // ลบข้อมูลเดิมทั้งหมด
-  const collections = [
-    "users",
-    "checkins",
-    "activityCheckins",
-    "groups",
-    "activities",
-    "tasks",
-    "activityLogs",
-  ];
-
-  for (const coll of collections) {
-    const snap = await getDocs(collection(db(), coll));
-    const batch = writeBatch(db());
-    snap.docs.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-  }
-
-  // นำเข้าข้อมูลใหม่
   const importBatch = async (collName: string, records: any[]) => {
-    const chunks = [];
     for (let i = 0; i < records.length; i += 500) {
-      chunks.push(records.slice(i, i + 500));
-    }
-    for (const chunk of chunks) {
       const batch = writeBatch(db());
-      chunk.forEach((record) => {
-        const docRef = doc(db(), collName, record.id);
-        batch.set(docRef, record);
+      records.slice(i, i + 500).forEach((record) => {
+        batch.set(doc(db(), collName, record.id), record);
       });
       await batch.commit();
     }
   };
 
-  await Promise.all([
-    importBatch("users", data.users),
-    importBatch("checkins", data.checkins),
-    importBatch("activityCheckins", data.activityCheckins),
-    importBatch("groups", data.groups),
-    importBatch("activities", data.activities),
-    importBatch("tasks", data.tasks),
-    importBatch("activityLogs", data.activityLogs),
-  ]);
+  const deleteOrphans = async (collName: string, newRecords: any[]) => {
+    const newIds = new Set(newRecords.map((r) => r.id as string));
+    const snap = await getDocs(collection(db(), collName));
+    const orphans = snap.docs.filter((d) => !newIds.has(d.id));
+    for (let i = 0; i < orphans.length; i += 500) {
+      const batch = writeBatch(db());
+      orphans.slice(i, i + 500).forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  };
+
+  const collections: Array<[string, any[]]> = [
+    ["users", data.users],
+    ["checkins", data.checkins],
+    ["activityCheckins", data.activityCheckins],
+    ["groups", data.groups],
+    ["activities", data.activities],
+    ["tasks", data.tasks],
+    ["activityLogs", data.activityLogs],
+  ];
+
+  // Phase 1: เขียนข้อมูลใหม่ก่อน — ป้องกันข้อมูลสูญหายถ้าเกิดข้อผิดพลาดกลางคัน
+  await Promise.all(collections.map(([name, records]) => importBatch(name, records)));
+
+  // Phase 2: ลบ doc ที่ไม่อยู่ใน backup ใหม่
+  await Promise.all(collections.map(([name, records]) => deleteOrphans(name, records)));
 }

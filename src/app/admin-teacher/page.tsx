@@ -61,7 +61,7 @@ function AdminTeacherInner() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [usersSubTab, setUsersSubTab] = useState<UsersSubTab>("manage");
 
-  const exportCheckins = () => {
+  const exportCheckins = async () => {
     if (items.length === 0) {
       toast.warning("ไม่มีข้อมูลให้ส่งออก");
       return;
@@ -77,7 +77,7 @@ function AdminTeacherInner() {
         : c.method === "tester" ? "Tester"
         : "",
     ]);
-    downloadXlsx(`checkin-ปี${userDoc?.year}-${range}-${todayStamp()}`, [
+    await downloadXlsx(`checkin-ปี${userDoc?.year}-${range}-${todayStamp()}`, [
       {
         name: `เช็คอินปี${userDoc?.year}`,
         headers,

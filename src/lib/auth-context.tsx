@@ -47,10 +47,14 @@ async function findExistingProfileByEmail(email: string): Promise<UserDoc | null
   );
 }
 
-async function ensureUserDoc(u: User) {
+// Returns true if the user has been blocked (deleted by admin)
+async function ensureUserDoc(u: User): Promise<boolean> {
+  const blockedSnap = await getDoc(doc(db(), "blockedUsers", u.uid));
+  if (blockedSnap.exists()) return true;
+
   const ref = doc(db(), "users", u.uid);
   const snap = await getDoc(ref);
-  if (snap.exists()) return;
+  if (snap.exists()) return false;
 
   const email = u.email ?? "";
   const isBootstrap = email.toLowerCase() === BOOTSTRAP_EMAIL.toLowerCase();
@@ -61,7 +65,8 @@ async function ensureUserDoc(u: User) {
         ...existing,
         uid: u.uid,
         email,
-        role: isBootstrap ? "top_admin" : "student",
+        // FIX: preserve the previous role instead of resetting to student
+        role: isBootstrap ? "top_admin" : existing.role,
         photoURL: u.photoURL ?? existing.photoURL ?? "",
         updatedAt: Date.now(),
       };
@@ -74,7 +79,7 @@ async function ensureUserDoc(u: User) {
         previousRole: existing.role,
         restoredRole: restored.role,
       });
-      return;
+      return false;
     }
 
     console.warn("No user profile for current uid; creating a fresh profile", {
@@ -97,6 +102,7 @@ async function ensureUserDoc(u: User) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
+  return false;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -106,17 +112,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth(), async (u) => {
-      setFbUser(u);
       if (!u) {
+        setFbUser(null);
         setUserDoc(null);
         setLoading(false);
         return;
       }
       try {
-        await ensureUserDoc(u);
+        const blocked = await ensureUserDoc(u);
+        if (blocked) {
+          // User was deleted by admin — sign out immediately without setting fbUser
+          await fbSignOut(auth());
+          return;
+        }
       } catch (e) {
         console.error("ensureUserDoc failed", e);
       }
+      setFbUser(u);
     });
     return () => unsubAuth();
   }, []);

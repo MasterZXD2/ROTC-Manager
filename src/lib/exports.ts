@@ -1,6 +1,6 @@
-/* CSV + Excel export utilities */
+/* CSV + Excel export utilities — uses exceljs (replaces xlsx 0.18.5) */
 
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export type Cell = string | number | null | undefined;
 
@@ -46,7 +46,7 @@ export function thaiDateTime(ts: number): string {
   });
 }
 
-/* ---------- Excel (.xlsx) export ---------- */
+/* ---------- Excel (.xlsx) helpers ---------- */
 
 export interface XlsxSheet {
   name: string;
@@ -56,13 +56,49 @@ export interface XlsxSheet {
   colWidths?: number[];
 }
 
-export function downloadXlsx(filename: string, sheets: XlsxSheet[]): void {
-  const wb = XLSX.utils.book_new();
-  for (const s of sheets) {
-    const aoa: Cell[][] = [s.headers, ...s.rows];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
+/** Helper: อ่าน ExcelJS Worksheet เป็น array ของ JSON objects (เทียบเท่า XLSX.utils.sheet_to_json) */
+export function wsToJson(ws: ExcelJS.Worksheet, defval: unknown = ""): Record<string, unknown>[] {
+  const headers: string[] = [];
+  const rows: Record<string, unknown>[] = [];
+  let firstRow = true;
+  ws.eachRow((row) => {
+    if (firstRow) {
+      firstRow = false;
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        headers[colNumber] = String(cell.value ?? "");
+      });
+      return;
+    }
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, colNum) => {
+      if (!h) return;
+      obj[h] = row.getCell(colNum).value ?? defval;
+    });
+    rows.push(obj);
+  });
+  return rows;
+}
 
-    // auto width = max length of column content (cap 60)
+/** Helper: เขียน array ของ JSON objects ลง worksheet (เทียบเท่า XLSX.utils.json_to_sheet) */
+export function addJsonSheet(
+  wb: ExcelJS.Workbook,
+  sheetName: string,
+  records: Record<string, unknown>[],
+): void {
+  const ws = wb.addWorksheet(sheetName);
+  if (records.length === 0) return;
+  const keys = Array.from(new Set(records.flatMap(Object.keys)));
+  const headerRow = ws.addRow(keys);
+  headerRow.font = { bold: true };
+  records.forEach((r) => ws.addRow(keys.map((k) => r[k] ?? "")));
+}
+
+export async function downloadXlsx(filename: string, sheets: XlsxSheet[]): Promise<void> {
+  const wb = new ExcelJS.Workbook();
+  for (const s of sheets) {
+    const safeName = s.name.slice(0, 31).replace(/[\\/?*[\]]/g, "_");
+    const ws = wb.addWorksheet(safeName);
+
     const widths = s.colWidths ?? s.headers.map((h, i) => {
       const max = Math.max(
         String(h).length,
@@ -70,13 +106,29 @@ export function downloadXlsx(filename: string, sheets: XlsxSheet[]): void {
       );
       return Math.min(Math.max(max + 2, 8), 60);
     });
-    ws["!cols"] = widths.map((w) => ({ wch: w }));
 
-    // ตัด sheet name ให้ <= 31 ตัว (ลิมิตของ Excel)
-    const safeName = s.name.slice(0, 31).replace(/[\\/?*[\]]/g, "_");
-    XLSX.utils.book_append_sheet(wb, ws, safeName);
+    ws.columns = widths.map((w) => ({ width: w }));
+
+    const headerRow = ws.addRow(s.headers);
+    headerRow.font = { bold: true };
+
+    for (const row of s.rows) {
+      ws.addRow(row.map((c) => c ?? ""));
+    }
   }
-  XLSX.writeFile(wb, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /** สร้างเทมเพลตใบเซ็นชื่อ (16 วัน 1 หน้า) */
@@ -102,4 +154,3 @@ export function buildSignInTemplateSheet(args: {
     colWidths,
   };
 }
-

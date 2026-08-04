@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +13,7 @@ import { downloadXlsx } from "@/lib/exports";
 import { useReviewFlow } from "@/components/ReviewBeforePrompt";
 import type { EditorPayload } from "@/lib/editor-bus";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 interface Props {
   callerUid: string;
@@ -53,8 +54,8 @@ export function BulkImportModal({
   const [bulkClassroom, setBulkClassroom] = useState<string>("");
   const review = useReviewFlow();
 
-  const downloadTemplate = () => {
-    downloadXlsx("template-นักเรียน", [{
+  const downloadTemplate = async () => {
+    await downloadXlsx("template-นักเรียน", [{
       name: "template",
       headers: ["studentId", "fullName", "nickname", "classroom", "year"],
       rows: [
@@ -98,9 +99,26 @@ export function BulkImportModal({
     setDone(null);
     try {
       const buf = await f.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error("ไม่พบ Sheet ในไฟล์");
+
+      const headers: string[] = [];
+      let firstRow = true;
+      const data: Record<string, unknown>[] = [];
+      ws.eachRow((row) => {
+        if (firstRow) {
+          firstRow = false;
+          row.eachCell({ includeEmpty: true }, (cell, col) => {
+            headers[col] = String(cell.value ?? "");
+          });
+          return;
+        }
+        const obj: Record<string, unknown> = {};
+        headers.forEach((h, col) => { if (h) obj[h] = row.getCell(col).value ?? ""; });
+        data.push(obj);
+      });
 
       const parsed: Row[] = data.map((r) => {
         const studentId = String(r.studentId ?? r["เลข นร."] ?? r["รหัสนักเรียน"] ?? "").trim();

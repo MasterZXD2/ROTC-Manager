@@ -92,7 +92,7 @@ export function ActivityCheckinResults({
     }
   };
 
-  const exportExcel = () => {
+  const exportExcel = async () => {
     const rows = students.map((s) => {
       const checkin = checkins.find((c) => c.userId === s.uid);
       const exemption = exemptions.find((e) => e.studentUid === s.uid);
@@ -101,7 +101,7 @@ export function ActivityCheckinResults({
       return [s.studentId, s.fullName, s.nickname, s.classroom, status, time];
     });
 
-    downloadXlsx(`กิจกรรม-${activity.name}-${todayStamp()}`, [
+    await downloadXlsx(`กิจกรรม-${activity.name}-${todayStamp()}`, [
       {
         name: activity.name,
         headers: ["รหัส นร.", "ชื่อ-สกุล", "ชื่อเล่น", "ห้อง", "สถานะ", "เวลาเช็คอิน"],

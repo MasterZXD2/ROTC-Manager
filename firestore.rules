@@ -97,6 +97,14 @@ service cloud.firestore {
         );
     }
 
+    // ===== blockedUsers/{uid} — UID ที่ถูก admin ลบ (ป้องกัน login กลับ) =====
+    match /blockedUsers/{uid} {
+      allow get: if isSignedIn() && self(uid);
+      allow list: if isTopAdmin();
+      allow create, update: if isTopAdmin() || isAdminLevel();
+      allow delete: if isTopAdmin();
+    }
+
     // ===== users/{uid}/dailyCheckins/{YYYY-MM-DD} =====
     match /users/{uid}/dailyCheckins/{date} {
       allow read: if isSignedIn() && (self(uid) || isAnyAdmin());
@@ -159,7 +167,7 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.used == false
         && request.resource.data.expiresAt > request.time.toMillis()
-        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000;
+        && request.resource.data.expiresAt <= request.time.toMillis() + 5 * 60 * 1000;
 
       allow update: if isSignedIn()
         && resource.data.used == false
@@ -184,7 +192,7 @@ service cloud.firestore {
         && request.resource.data.code == code
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.expiresAt > request.time.toMillis()
-        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000
+        && request.resource.data.expiresAt <= request.time.toMillis() + 5 * 60 * 1000
         && (
           isTopAdmin()
           || (isAdminTeacher()
@@ -390,7 +398,8 @@ service cloud.firestore {
     }
 
     // ===== attendanceExemptions/{dayKey_uid} — ยกเว้นการขาด (นับเป็นมาแทน) =====
-    match /attendanceExemptions/{exemptionId} {      allow read: if isSignedIn();
+    match /attendanceExemptions/{exemptionId} {
+      allow read: if isSignedIn();
 
       // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin
       allow create, update: if isSignedIn()

@@ -66,7 +66,7 @@ export function RosterExportModal({ year, open, onClose }: Props) {
     [extraBlanks],
   );
 
-  const exportNow = () => {
+  const exportNow = async () => {
     if (cols.length === 0 && blankCols.length === 0) {
       toast.warning("เลือกอย่างน้อย 1 คอลัมน์");
       return;
@@ -91,7 +91,7 @@ export function RosterExportModal({ year, open, onClose }: Props) {
         ? [buildSignInTemplateSheet({ year, students })]
         : []),
     ];
-    downloadXlsx(`รายชื่อ-ปี${year}-${todayStamp()}`, sheets);
+    await downloadXlsx(`รายชื่อ-ปี${year}-${todayStamp()}`, sheets);
     toast.success("ดาวน์โหลด Excel แล้ว");
   };
 
