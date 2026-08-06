@@ -18,7 +18,8 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
   const [activities, setActivities] = useState<ActivityDoc[]>([]);
   const [checkins, setCheckins] = useState<ActivityCheckinDoc[]>([]);
   const [submitting, setSubmitting] = useState<string | null>(null);
-  const [code, setCode] = useState("");
+  // ใช้ object แทน state เดียว — แต่ละ activity มี code ของตัวเอง
+  const [codes, setCodes] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const q = query(
@@ -64,12 +65,13 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
   };
 
   const handleCodeCheckin = async (activityId: string) => {
-    if (!code.trim()) return toast.error("กรอกรหัสฉุกเฉิน");
+    const codeValue = (codes[activityId] ?? "").trim();
+    if (!codeValue) return toast.error("กรอกรหัสฉุกเฉิน");
     setSubmitting(activityId);
     try {
-      await submitActivityEmergencyCheckin(userDoc.uid, code);
+      await submitActivityEmergencyCheckin(userDoc.uid, activityId, codeValue);
       toast.success("เช็คอินสำเร็จ!");
-      setCode("");
+      setCodes((prev) => ({ ...prev, [activityId]: "" }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "เช็คอินไม่สำเร็จ");
     } finally {
@@ -165,8 +167,10 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
                     <Input
                       type="text"
                       placeholder="รหัสฉุกเฉิน 6 หลัก"
-                      value={code}
-                      onChange={(e) => setCode(e.target.value)}
+                      value={codes[activity.id] ?? ""}
+                      onChange={(e) =>
+                        setCodes((prev) => ({ ...prev, [activity.id]: e.target.value }))
+                      }
                       maxLength={6}
                       className="flex-1"
                     />

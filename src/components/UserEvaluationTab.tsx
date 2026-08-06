@@ -135,20 +135,26 @@ export function UserEvaluationTab({ callerUid, users, yearScope = null }: Props)
     }
 
     const activitiesByYear = new Map<number, ActivityDoc[]>();
+    const normalActivityIds = new Set<string>();
     for (const activity of activities) {
       if (activity.type === "external") continue;
+      normalActivityIds.add(activity.id);
       if (!activitiesByYear.has(activity.year)) activitiesByYear.set(activity.year, []);
       activitiesByYear.get(activity.year)!.push(activity);
     }
 
     const attendedActivitiesByStudent = new Map<string, Set<string>>();
     for (const checkin of activityCheckins) {
+      // นับเฉพาะ check-in ของกิจกรรมประเภท normal เท่านั้น
+      if (!normalActivityIds.has(checkin.activityId)) continue;
       if (!attendedActivitiesByStudent.has(checkin.userId)) {
         attendedActivitiesByStudent.set(checkin.userId, new Set());
       }
       attendedActivitiesByStudent.get(checkin.userId)!.add(checkin.activityId);
     }
     for (const exemption of activityExemptions) {
+      // ยกเว้นเฉพาะกิจกรรม normal เท่านั้น
+      if (!normalActivityIds.has(exemption.activityId)) continue;
       if (!attendedActivitiesByStudent.has(exemption.studentUid)) {
         attendedActivitiesByStudent.set(exemption.studentUid, new Set());
       }

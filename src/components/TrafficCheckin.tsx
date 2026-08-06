@@ -65,6 +65,10 @@ export function TrafficCheckin({ userDoc }: { userDoc: UserDoc }) {
     return { myGroup, currentDuty, isMyTurn };
   }, [groups, userDoc]);
 
+  const isTester = !!userDoc.isTester;
+  const isTrafficRepair = !!userDoc.isTrafficRepair;
+  const dailyDone = !isTester && todayCount >= 2;
+
   const activeSlot = useMemo(() => {
     if (!config) return null;
     const now = nowMinutesBangkok();
@@ -86,21 +90,35 @@ export function TrafficCheckin({ userDoc }: { userDoc: UserDoc }) {
   }, [config, tick]);
 
   const canCheckin = useMemo(() => {
+    if (isTester) return !!gps.position;
     if (!config || !gps.position || !activeSlot || config.locations.length === 0) return false;
-    // หาจุดใกล้สุด
+    if (gps.accuracy === null || gps.accuracy > config.maxAccuracyMeters) return false;
+
     let minDist = Infinity;
     for (const loc of config.locations) {
       const d = distanceMeters(gps.position, loc);
       if (d < minDist) minDist = d;
     }
-    return minDist <= config.allowedRadiusMeters && (duty.isMyTurn || !!userDoc.isTrafficRepair);
-  }, [config, gps.position, activeSlot, tick, duty.isMyTurn, userDoc.isTrafficRepair]);
+
+    return (
+      minDist <= config.allowedRadiusMeters
+      && (duty.isMyTurn || isTrafficRepair)
+      && !dailyDone
+    );
+  }, [
+    config, gps.position, gps.accuracy, activeSlot, tick,
+    duty.isMyTurn, isTester, isTrafficRepair, dailyDone,
+  ]);
 
   const handleCheckin = async () => {
     if (!userDoc) return;
     if (!gps.position) return toast.error("รอสัญญาณ GPS");
-    if (gps.accuracy && gps.accuracy > 100) {
-      return toast.error(`ความแม่นยำ GPS ต่ำ (${gps.accuracy.toFixed(0)} ม.)`);
+    if (!isTester && (
+      gps.accuracy === null
+      || !config
+      || gps.accuracy > config.maxAccuracyMeters
+    )) {
+      return toast.error("ความแม่นยำ GPS ต่ำ (" + Math.round(gps.accuracy ?? 0) + " ม.)");
     }
     if (!canCheckin) return toast.error("อยู่นอกระยะเช็คอิน");
 
@@ -232,7 +250,7 @@ export function TrafficCheckin({ userDoc }: { userDoc: UserDoc }) {
 
           <Button
             onClick={handleCheckin}
-            disabled={!canCheckin || submitting || !activeSlot}
+            disabled={!canCheckin || submitting || dailyDone}
             className="w-full"
             size="lg"
           >

@@ -1361,35 +1361,49 @@ export async function submitActivityCheckin(
 
 export async function submitActivityEmergencyCheckin(
   uid: string,
+  activityId: string,
   code: string,
 ): Promise<void> {
+  if (!/^\d{6}$/.test(code)) throw new Error("รหัสฉุกเฉินไม่ถูกต้อง");
+
   const profile = await loadProfile(uid);
   const codeRef = doc(db(), "activityEmergencyCodes", code);
+  const activityRef = doc(db(), "activities", activityId);
+
   await runTransaction(db(), async (tx) => {
+    const activitySnap = await tx.get(activityRef);
     const codeSnap = await tx.get(codeRef);
+
+    if (!activitySnap.exists()) throw new Error("ไม่พบกิจกรรม");
+    const activity = activitySnap.data() as any;
+    if (!activity.isOpen) throw new Error("กิจกรรมนี้ปิดรับเช็คอินแล้ว");
+
     if (!codeSnap.exists()) throw new Error("รหัสไม่ถูกต้อง");
     const codeData = codeSnap.data() as any;
-
+    if (codeData.activityId !== activityId)
+      throw new Error("รหัสนี้เป็นของกิจกรรมอื่น");
     if (codeData.used) throw new Error("รหัสนี้ถูกใช้ไปแล้ว");
     if (Date.now() > codeData.expiresAt) throw new Error("รหัสหมดอายุแล้ว");
-    if (codeData.year !== profile.year) throw new Error("รหัสนี้ไม่ใช่ของชั้นปีคุณ");
+    if (codeData.year !== profile.year)
+      throw new Error("รหัสนี้ไม่ใช่ของชั้นปีคุณ");
 
-    const checkinId = `${codeData.activityId}_${uid}`;
+    const checkinId = activityId + "_" + uid;
     const checkinRef = doc(db(), "activityCheckins", checkinId);
     const existingSnap = await tx.get(checkinRef);
     if (existingSnap.exists()) throw new Error("คุณเช็คอินกิจกรรมนี้ไปแล้ว");
 
+    const now = Date.now();
     tx.set(checkinRef, {
       id: checkinId,
-      activityId: codeData.activityId,
-      activityName: codeData.activityName,
+      activityId,
+      activityName: activity.name,
       userId: uid,
       fullName: profile.fullName,
       nickname: profile.nickname,
       classroom: profile.classroom,
       year: profile.year,
       studentId: profile.studentId,
-      timestamp: Date.now(),
+      timestamp: now,
       location: { lat: 0, lng: 0 },
       accuracy: 0,
       distanceMeters: -1,
@@ -1400,11 +1414,10 @@ export async function submitActivityEmergencyCheckin(
     tx.update(codeRef, {
       used: true,
       usedBy: uid,
-      usedAt: Date.now(),
+      usedAt: now,
     });
   });
 }
-
 export async function createActivityEmergencyCode(
   callerUid: string,
   activityId: string,

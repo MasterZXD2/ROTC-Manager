@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Loader2, KeyRound, Sparkles } from "lucide-react";
+import { Loader2, KeyRound, LogOut, Sparkles } from "lucide-react";
 import { redeemInviteCode, lookupPendingStudent } from "@/lib/actions";
 import { isProfileComplete } from "@/lib/profile";
 import type { GlobalConfig } from "@/lib/types";
@@ -29,13 +29,14 @@ type Form = z.infer<typeof schema>;
 type Step = "code" | "form";
 
 export default function RegisterPage() {
-  const { fbUser, userDoc, loading } = useAuth();
+  const { fbUser, userDoc, loading, signOut } = useAuth();
   const router = useRouter();
   const [step, setStep] = useState<Step>("code");
   const [code, setCode] = useState("");
   const [codeYear, setCodeYear] = useState<number | null>(null);
   const [codeErr, setCodeErr] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
   const [requireCode, setRequireCode] = useState<boolean>(true);
 
@@ -124,6 +125,17 @@ export default function RegisterPage() {
     }
   };
 
+  const handleSwitchAccount = async () => {
+    setSwitchingAccount(true);
+    try {
+      await signOut();
+      router.replace("/login");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ออกจากบัญชีไม่สำเร็จ");
+      setSwitchingAccount(false);
+    }
+  };
+
   const onSubmit = handleSubmit(async (data) => {
     setSubmitErr(null);
     if (!fbUser) return;
@@ -169,6 +181,27 @@ export default function RegisterPage() {
           <Button size="lg" className="w-full" onClick={submitCode} disabled={redeeming}>
             {redeeming ? <Loader2 className="h-5 w-5 animate-spin" /> : "ยืนยันรหัส"}
           </Button>
+          <div className="pt-3 text-center">
+            <p className="mb-2 text-sm text-muted-foreground">
+              หากมีบัญชีอยู่แล้ว หรือเข้าสู่ระบบด้วย Gmail ผิดบัญชี
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={handleSwitchAccount}
+              disabled={redeeming || switchingAccount}
+            >
+              {switchingAccount ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  กลับไปเลือกบัญชี Google ใหม่
+                </>
+              )}
+            </Button>
+          </div>
           {!requireCode && (
             <Button
               size="lg"

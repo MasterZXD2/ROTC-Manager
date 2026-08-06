@@ -444,7 +444,11 @@ service cloud.firestore {
       allow list: if isSignedIn();
 
       allow create: if isSignedIn()
+        && request.resource.data.id == checkinId
         && request.resource.data.userId == request.auth.uid
+        && request.resource.data.activityId is string
+        && request.resource.data.method in ["gps", "emergency_code"]
+        && get(/databases/$(database)/documents/activities/$(request.resource.data.activityId)).data.isOpen == true
         && request.resource.data.timestamp >= request.time.toMillis() - 60000
         && request.resource.data.timestamp <= request.time.toMillis() + 60000;
 
@@ -468,6 +472,7 @@ service cloud.firestore {
         && resource.data.used == false
         && request.resource.data.used == true
         && request.resource.data.usedBy == request.auth.uid
+        && get(/databases/$(database)/documents/activities/$(resource.data.activityId)).data.isOpen == true
         && request.time.toMillis() <= resource.data.expiresAt;
 
       allow delete: if isTopAdmin()
