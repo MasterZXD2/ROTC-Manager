@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ActivityCheckin } from "@/components/ActivityCheckin";
+import { EmergencyCodePanel } from "@/components/EmergencyCodePanel";
 import { TrafficCheckin } from "@/components/TrafficCheckin";
 import type { UserDoc } from "@/lib/types";
 
@@ -38,6 +39,7 @@ export function StudentCheckinView({ userDoc }: { userDoc: UserDoc }) {
           )}
         </CardContent>
       </Card>
+      {checkinType === "traffic" && <EmergencyCodePanel userDoc={userDoc} />}
     </div>
   );
 }

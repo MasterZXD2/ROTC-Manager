@@ -316,15 +316,17 @@ function GroupCard({
               <Button variant="ghost" size="icon" onClick={onEdit} disabled={busy}>
                 <Edit2 className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={handleDelete} disabled={busy}>
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                )}
-              </Button>
             </div>
           )}
+          <div className="flex gap-1">
+            <Button variant="ghost" size="icon" onClick={handleDelete} disabled={busy} title="ลบกลุ่ม">
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 text-destructive" />
+              )}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">

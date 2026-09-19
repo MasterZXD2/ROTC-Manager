@@ -47,10 +47,14 @@ export function RosterExportModal({ year, open, onClose }: Props) {
     const q = query(
       collection(db(), "users"),
       where("year", "==", year),
-      where("role", "==", "student"),
       orderBy("fullName"),
     );
-    return onSnapshot(q, (s) => setStudents(s.docs.map((d) => d.data() as UserDoc)));
+    return onSnapshot(q, (s) => {
+      const users = s.docs.map((d) => d.data() as UserDoc);
+      // กรองเฉพาะ student และ admin_student
+      const filtered = users.filter((u) => u.role === "student" || u.role === "admin_student");
+      setStudents(filtered);
+    });
   }, [year, open]);
 
   const toggle = (key: string) => {

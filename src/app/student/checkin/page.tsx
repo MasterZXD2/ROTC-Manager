@@ -13,7 +13,7 @@ import { HelpModal } from "@/components/HelpModal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Loader2, LogOut, KeyRound, CheckCircle2, Settings } from "lucide-react";
+import { Loader2, LogOut, KeyRound, CheckCircle2, RefreshCw, Settings } from "lucide-react";
 import { submitCheckin, submitCheckinWithCode } from "@/lib/actions";
 import { RequireRole } from "@/components/RequireRole";
 import { StudentBottomNav } from "@/components/StudentBottomNav";
@@ -252,6 +252,7 @@ function CheckinInner() {
 
           <CheckinMap
             user={gps.position}
+            userAccuracy={gps.accuracy}
             targets={config.locations}
             radius={config.allowedRadiusMeters}
           />
@@ -267,20 +268,26 @@ function CheckinInner() {
               dailyDone={dailyDone}
               nextSlot={nextSlot}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={gps.refresh}
+              disabled={gps.loading}
+            >
+              {gps.loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              อัปเดตตำแหน่งใหม่
+            </Button>
             {gps.error && (
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full"
-                onClick={() => {
-                  if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(
-                      () => toast.success("สิทธิ์ GPS อนุญาตแล้ว กรุณารอสักครู่"),
-                      () => toast.error("กรุณาอนุญาตสิทธิ์ตำแหน่งในการตั้งค่าเบราว์เซอร์"),
-                      { enableHighAccuracy: true }
-                    );
-                  }
-                }}
+                onClick={gps.refresh}
               >
                 <Settings className="mr-2 h-4 w-4" />
                 ตั้งค่าสิทธิ์ GPS

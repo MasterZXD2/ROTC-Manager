@@ -252,6 +252,7 @@ export interface ActivityDoc {
   }>;
   radiusMeters: number;            // ระยะเช็คอินต่อกิจกรรม
   isOpen: boolean;                 // สวิตช์ เปิด/ปิด
+  isVisible?: boolean;             // เปิดเผยให้นักเรียนเห็น (default: true)
   createdBy: string;
   createdByName: string;
   createdAt: number;

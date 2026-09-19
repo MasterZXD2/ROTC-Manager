@@ -328,7 +328,7 @@ service cloud.firestore {
              ["checkStatus", "checkedBy", "checkedByName", "checkedAt", "updatedAt"]
            );
 
-      allow delete: if isAdminTeacher() || isTopAdmin();
+      allow delete: if isAnyAdmin();
     }
 
     // ===== swapRequests/{requestId} — คำขอสลับเวร =====
@@ -427,6 +427,7 @@ service cloud.firestore {
         && request.resource.data.radiusMeters <= 500
         && request.resource.data.locations is list
         && request.resource.data.isOpen is bool
+        && (!("isVisible" in request.resource.data) || request.resource.data.isVisible is bool)
         && (isTopAdmin() || request.resource.data.year == myYear());
 
       allow update: if (isAdminLevel() || isTopAdmin())

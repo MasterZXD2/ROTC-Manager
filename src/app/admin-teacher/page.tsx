@@ -501,6 +501,9 @@ function UsersInYear({
       </div>
 
       <Card>
+        <CardHeader>
+          <CardTitle>จัดการนักเรียน ({filtered.length} คน)</CardTitle>
+        </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-muted-foreground">

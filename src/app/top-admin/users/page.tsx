@@ -7,7 +7,7 @@ import { RequireRole } from "@/components/RequireRole";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Trash2, FlaskConical, UserPlus, Pencil, Upload, Wrench } from "lucide-react";
+import { Trash2, FlaskConical, UserPlus, Pencil, Upload, Wrench, Download } from "lucide-react";
 import {
   deleteUserAndCheckins,
   setUserRole,
@@ -21,6 +21,7 @@ import Link from "next/link";
 import type { UserDoc, Role } from "@/lib/types";
 import { EditUserModal } from "@/components/EditUserModal";
 import { BulkImportModal } from "@/components/BulkImportModal";
+import { RosterExportModal } from "@/components/RosterExportModal";
 import { UserEvaluationTab } from "@/components/UserEvaluationTab";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -40,6 +41,7 @@ function UsersInner() {
   const [busyInv, setBusyInv] = useState(false);
   const [editing, setEditing] = useState<UserDoc | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [subTab, setSubTab] = useState<"manage" | "evaluation">("manage");
 
   const newInvCode = async () => {
@@ -150,6 +152,14 @@ function UsersInner() {
     } finally { setBusy(null); }
   };
 
+  const handleExport = () => {
+    if (!yearFilter) {
+      toast.warning("กรุณาเลือกชั้นปีก่อนส่งออกรายชื่อ");
+      return;
+    }
+    setShowExportModal(true);
+  };
+
   return (
     <main className="mx-auto max-w-4xl p-4">
       <Nav />
@@ -158,9 +168,14 @@ function UsersInner() {
           {subTab === "manage" ? `ผู้ใช้ทั้งหมด (${filtered.length})` : "ผลประเมินผู้ใช้"}
         </h1>
         {subTab === "manage" && (
-          <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
-            <Upload className="mr-1 h-4 w-4" />นำเข้านักเรียน
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleExport}>
+              <Download className="mr-1 h-4 w-4" />ส่งออกรายชื่อ
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setBulkOpen(true)}>
+              <Upload className="mr-1 h-4 w-4" />นำเข้านักเรียน
+            </Button>
+          </div>
         )}
       </div>
 
@@ -388,6 +403,14 @@ function UsersInner() {
           lockYear={false}
           open={bulkOpen}
           onClose={() => setBulkOpen(false)}
+        />
+      )}
+
+      {showExportModal && yearFilter && (
+        <RosterExportModal
+          year={Number(yearFilter)}
+          open={showExportModal}
+          onClose={() => setShowExportModal(false)}
         />
       )}
     </main>

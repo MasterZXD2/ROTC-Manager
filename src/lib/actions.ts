@@ -211,6 +211,7 @@ export async function submitCheckin(
 
 export async function requestEmergencyCode(args: {
   callerUid: string;
+  year?: number;
 }): Promise<{ code: string; expiresAt: number }> {
   const caller = await loadProfile(args.callerUid);
   const allowed =
@@ -219,6 +220,10 @@ export async function requestEmergencyCode(args: {
     caller.role === "admin"; // legacy
   if (!allowed) throw new Error("เฉพาะครูและ Top Admin เท่านั้น");
 
+  const year = caller.role === "top_admin" ? args.year : caller.year;
+  if (!Number.isInteger(year) || !year || year < 1 || year > 5)
+    throw new Error("กรุณาเลือกชั้นปีสำหรับรหัสฉุกเฉิน");
+
   const code = genCode();
   const expiresAt = Date.now() + 5 * 60 * 1000;
 
@@ -226,7 +231,7 @@ export async function requestEmergencyCode(args: {
     code,
     createdBy: caller.uid,
     createdByName: caller.fullName || caller.email,
-    year: caller.year,
+    year,
     classroom: null,
     expiresAt,
     used: false,
@@ -818,8 +823,8 @@ export async function lookupPendingStudent(studentId: string) {
 
 async function ensureAdminLevel(callerUid: string) {
   const caller = await loadProfile(callerUid);
-  const ok = ["admin_teacher", "admin", "top_admin"].includes(caller.role);
-  if (!ok) throw new Error("เฉพาะครูเท่านั้น");
+  const ok = ["admin_teacher", "admin_student", "admin", "top_admin"].includes(caller.role);
+  if (!ok) throw new Error("เฉพาะ admin เท่านั้น");
   return caller;
 }
 
@@ -1196,6 +1201,7 @@ export async function createActivity(
     type: "normal" | "external";
     locations: Array<{ id: string; name: string; lat: number; lng: number }>;
     radiusMeters: number;
+    isVisible?: boolean;
   },
 ): Promise<string> {
   await ensureAdminLevel(callerUid);
@@ -1213,6 +1219,7 @@ export async function createActivity(
     locations: data.locations,
     radiusMeters: data.radiusMeters,
     isOpen: false,
+    isVisible: data.isVisible ?? true,
     createdBy: caller.uid,
     createdByName: caller.fullName || caller.email,
     createdAt: Date.now(),
@@ -1229,6 +1236,7 @@ export async function updateActivity(
     type?: "normal" | "external";
     locations?: Array<{ id: string; name: string; lat: number; lng: number }>;
     radiusMeters?: number;
+    isVisible?: boolean;
   },
 ): Promise<void> {
   await ensureAdminLevel(callerUid);

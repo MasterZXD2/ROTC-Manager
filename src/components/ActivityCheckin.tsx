@@ -27,9 +27,13 @@ export function ActivityCheckin({ userDoc }: { userDoc: UserDoc }) {
       where("year", "==", userDoc.year),
       where("isOpen", "==", true),
     );
-    return onSnapshot(q, (snap) =>
-      setActivities(snap.docs.map((d) => d.data() as ActivityDoc)),
-    );
+    return onSnapshot(q, (snap) => {
+      // กรองเฉพาะกิจกรรมที่เปิดเผย (isVisible !== false)
+      const visible = snap.docs
+        .map((d) => d.data() as ActivityDoc)
+        .filter((a) => a.isVisible !== false);
+      setActivities(visible);
+    });
   }, [userDoc.year]);
 
   useEffect(() => {

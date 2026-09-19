@@ -114,6 +114,20 @@ export function AdminActivitiesTab({ userDoc }: { userDoc: UserDoc }) {
                       }`}
                     />
                     <CardTitle className="text-base">{activity.name}</CardTitle>
+                    {activity.type === "external" ? (
+                      <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                        ภายนอก
+                      </span>
+                    ) : (
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+                        ทั่วไป
+                      </span>
+                    )}
+                    {activity.isVisible === false && (
+                      <span className="rounded bg-orange-100 px-2 py-0.5 text-xs text-orange-700">
+                        ไม่เปิดเผย
+                      </span>
+                    )}
                   </div>
                   <div className="flex gap-1">
                     <Button
@@ -233,6 +247,7 @@ function ActivityModal({
   const [year, setYear] = useState(isNew ? defaultYear : activity.year);
   const [type, setType] = useState<"normal" | "external">(isNew ? "normal" : (activity.type || "normal"));
   const [radiusMeters, setRadiusMeters] = useState(isNew ? 30 : activity.radiusMeters);
+  const [isVisible, setIsVisible] = useState(isNew ? true : (activity.isVisible ?? true));
   const [locations, setLocations] = useState<Array<{ id: string; name: string; lat: number; lng: number }>>(
     isNew ? [] : activity.locations,
   );
@@ -248,10 +263,10 @@ function ActivityModal({
     setBusy(true);
     try {
       if (isNew) {
-        await createActivity(userDoc.uid, { name, year, type, locations, radiusMeters });
+        await createActivity(userDoc.uid, { name, year, type, locations, radiusMeters, isVisible });
         toast.success("สร้างกิจกรรมแล้ว");
       } else {
-        await updateActivity(userDoc.uid, activity.id, { name, type, locations, radiusMeters });
+        await updateActivity(userDoc.uid, activity.id, { name, type, locations, radiusMeters, isVisible });
         toast.success("แก้ไขกิจกรรมแล้ว");
       }
       onClose();
@@ -423,6 +438,21 @@ function ActivityModal({
                 ))}
               </div>
             )}
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={isVisible}
+                onChange={(e) => setIsVisible(e.target.checked)}
+                className="h-4 w-4"
+              />
+              เปิดเผยให้นักเรียนเห็น
+            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isVisible ? "นักเรียนจะเห็นกิจกรรมนี้" : "ซ่อนจากนักเรียน (admin เท่านั้นที่เห็น)"}
+            </p>
           </div>
 
           <div className="flex gap-2 pt-2">

@@ -3,7 +3,7 @@
 import { MapContainer, TileLayer, Marker, Circle, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect } from "react";
+import { Fragment, useEffect } from "react";
 
 // fix default icon path issue under bundlers
 const userIcon = L.divIcon({
@@ -30,12 +30,13 @@ function Recenter({ lat, lng }: { lat: number; lng: number }) {
 
 interface Props {
   user: { lat: number; lng: number } | null;
+  userAccuracy?: number | null;
   targets: Array<{ id: string; name: string; lat: number; lng: number }>;
   radius: number;
   height?: string;
 }
 
-export function CheckinMap({ user, targets, radius, height = "240px" }: Props) {
+export function CheckinMap({ user, userAccuracy, targets, radius, height = "240px" }: Props) {
   const center = user ?? targets[0] ?? { lat: 13.7563, lng: 100.5018 };
 
   return (
@@ -51,15 +52,22 @@ export function CheckinMap({ user, targets, radius, height = "240px" }: Props) {
           attribution='&copy; OpenStreetMap'
         />
         {targets.map((t) => (
-          <span key={t.id}>
+          <Fragment key={t.id}>
             <Marker position={[t.lat, t.lng]} icon={targetIcon} />
             <Circle
               center={[t.lat, t.lng]}
               radius={radius}
               pathOptions={{ color: "#15803d", fillColor: "#15803d", fillOpacity: 0.1 }}
             />
-          </span>
+          </Fragment>
         ))}
+        {user && userAccuracy !== null && userAccuracy !== undefined && (
+          <Circle
+            center={[user.lat, user.lng]}
+            radius={Math.max(userAccuracy, 1)}
+            pathOptions={{ color: "#2563eb", fillColor: "#2563eb", fillOpacity: 0.08 }}
+          />
+        )}
         {user && <Marker position={[user.lat, user.lng]} icon={userIcon} />}
         {user && <Recenter lat={user.lat} lng={user.lng} />}
       </MapContainer>

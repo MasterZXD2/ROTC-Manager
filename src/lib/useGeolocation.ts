@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type GpsErrorKind =
   | "permission_denied"
@@ -14,7 +14,10 @@ export interface GpsState {
   accuracy: number | null;
   error: { kind: GpsErrorKind; message: string } | null;
   lastUpdate: number | null;
+  refresh: () => void;
 }
+
+type GpsSnapshot = Omit<GpsState, "refresh">;
 
 const ERROR_MAP: Record<number, { kind: GpsErrorKind; message: string }> = {
   1: {
@@ -36,7 +39,7 @@ const ERROR_MAP: Record<number, { kind: GpsErrorKind; message: string }> = {
  * ใช้แสดง "ห่างกี่เมตร" แบบ real-time ไม่ต้องรอตอนกดปุ่ม
  */
 export function useGeolocation(enabled: boolean = true): GpsState {
-  const [state, setState] = useState<GpsState>({
+  const [state, setState] = useState<GpsSnapshot>({
     loading: enabled,
     position: null,
     accuracy: null,
@@ -44,6 +47,42 @@ export function useGeolocation(enabled: boolean = true): GpsState {
     lastUpdate: null,
   });
   const watchId = useRef<number | null>(null);
+
+  const applyPosition = useCallback((pos: GeolocationPosition) => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const accuracy = pos.coords.accuracy;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(accuracy)) return;
+
+    setState({
+      loading: false,
+      position: { lat, lng },
+      accuracy,
+      lastUpdate: Date.now(),
+      error: null,
+    });
+  }, []);
+
+  const applyError = useCallback((err: GeolocationPositionError) => {
+    setState((s) => ({
+      ...s,
+      loading: false,
+      error: ERROR_MAP[err.code] ?? {
+        kind: "position_unavailable",
+        message: err.message || "ไม่สามารถระบุตำแหน่งได้",
+      },
+    }));
+  }, []);
+
+  const refresh = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    setState((s) => ({ ...s, loading: true, error: null }));
+    navigator.geolocation.getCurrentPosition(applyPosition, applyError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 30000,
+    });
+  }, [applyError, applyPosition]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -73,34 +112,17 @@ export function useGeolocation(enabled: boolean = true): GpsState {
       return;
     }
 
-    watchId.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        setState({
-          loading: false,
-          position: { lat: pos.coords.latitude, lng: pos.coords.longitude },
-          accuracy: pos.coords.accuracy,
-          lastUpdate: Date.now(),
-          error: null,
-        });
-      },
-      (err) => {
-        setState((s) => ({
-          ...s,
-          loading: false,
-          error: ERROR_MAP[err.code] ?? {
-            kind: "position_unavailable",
-            message: err.message || "ไม่สามารถระบุตำแหน่งได้",
-          },
-        }));
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
-    );
+    watchId.current = navigator.geolocation.watchPosition(applyPosition, applyError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 30000,
+    });
 
     return () => {
       if (watchId.current !== null)
         navigator.geolocation.clearWatch(watchId.current);
     };
-  }, [enabled]);
+  }, [applyError, applyPosition, enabled]);
 
-  return state;
+  return { ...state, refresh };
 }

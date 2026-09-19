@@ -33,7 +33,7 @@ export function ActivityCheckinResults({
       query(
         collection(db(), "users"),
         where("year", "==", activity.year),
-        where("role", "==", "student"),
+        where("role", "in", ["student", "admin_student"]),
       ),
       (snap) => setStudents(snap.docs.map((d) => d.data() as UserDoc)),
     );
