@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
-import { Download, Upload, RotateCcw, Loader2, CheckCircle2 } from "lucide-react";
+import { Download, Upload, RotateCcw, Loader2, CheckCircle2, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
   const running = useRef(false);
   const pendingPanel = useRef<HTMLDivElement>(null);
   const errorPanel = useRef<HTMLDivElement>(null);
+  const verifyInput = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [maintenance, setMaintenance] = useState<MaintenanceState | null>(null);
@@ -86,6 +87,16 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
     });
   }
 
+  function exportExcel(backup?: BackupFile) {
+    void run(async () => {
+      const snapshot = backup ?? (await prepareBackup(userDoc.uid, "backup", setStatus)).safety;
+      setStatus("กำลังสร้างไฟล์ Excel...");
+      const { downloadBackupExcel } = await import("@/lib/backup-excel");
+      await downloadBackupExcel(snapshot);
+      toast.success("เตรียมไฟล์ Excel แล้ว กรุณาตรวจไฟล์ในโฟลเดอร์ดาวน์โหลด");
+    });
+  }
+
   function selectFile(file: File | undefined, verify: boolean) {
     if (verify) setVerified(false);
     else setTarget(null);
@@ -102,10 +113,16 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
   }
 
   const expectedPhrase = pending?.kind === "reset" ? "เริ่มเทอมใหม่" : "กู้คืนข้อมูล";
+  const confirmationMatches = phrase.trim() === expectedPhrase;
+  const confirmationBlocker = !verified
+    ? "ยังไม่ได้ตรวจไฟล์สำรอง กรุณาเลือกไฟล์ .json ที่เพิ่งดาวน์โหลดในขั้นตอนที่ 1 ก่อน"
+    : !maintenance?.active
+      ? "สถานะพักรับข้อมูลเปลี่ยนไป กรุณายกเลิกและเริ่มขั้นตอนใหม่"
+      : !confirmationMatches ? `กรุณาพิมพ์ “${expectedPhrase}” ให้ตรงกับข้อความที่กำหนด` : "";
   const disabled = busy || !loaded || Boolean(maintenance?.active) || Boolean(pending);
 
   async function execute() {
-    if (!pending || !verified || phrase !== expectedPhrase || busy) return;
+    if (!pending || !verified || !confirmationMatches || busy || !maintenance?.active) return;
     const operation = pending;
     const ok = await confirm({
       title: operation.kind === "reset" ? "เริ่มเทอมใหม่ตามรายการนี้?" : "แทนที่ข้อมูลด้วยไฟล์สำรอง?",
@@ -180,9 +197,13 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
             <div className="space-y-2">
               <p className="font-medium">1. เก็บและตรวจไฟล์สำรองข้อมูลปัจจุบัน</p>
               <p className="text-sm text-muted-foreground">ระบบเริ่มดาวน์โหลดไฟล์แล้ว เลือกไฟล์นั้นกลับมาตรวจ เพื่อยืนยันว่าคุณมีสำเนาที่เปิดอ่านได้ก่อนดำเนินการ</p>
-              <Button variant="outline" disabled={busy} onClick={() => downloadBackup(pending.safety)}><Download className="h-4 w-4" />ดาวน์โหลดไฟล์อีกครั้ง</Button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                <Button variant="outline" disabled={busy} onClick={() => downloadBackup(pending.safety)}><Download className="h-4 w-4" />ดาวน์โหลดไฟล์อีกครั้ง</Button>
+                <Button variant="outline" disabled={busy} onClick={() => exportExcel(pending.safety)}><FileSpreadsheet className="h-4 w-4" />ส่งออก Excel (.xlsx)</Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Excel สำหรับอ่านและทำรายงาน ขั้นตอนตรวจไฟล์และกู้คืนใช้ไฟล์ JSON</p>
               <Label htmlFor="verify-safety-backup" className="block">เลือกไฟล์สำรองที่เพิ่งดาวน์โหลด</Label>
-              <Input id="verify-safety-backup" type="file" accept=".json,application/json" disabled={busy} onChange={(e) => { selectFile(e.target.files?.[0], true); e.target.value = ""; }} />
+              <Input ref={verifyInput} id="verify-safety-backup" type="file" accept=".json,application/json" disabled={busy} onChange={(e) => { selectFile(e.target.files?.[0], true); e.target.value = ""; }} />
               {verified && <p role="status" className="flex items-center gap-2 text-sm text-primary"><CheckCircle2 className="h-4 w-4" />ตรวจไฟล์แล้ว ตรงกับข้อมูลก่อนดำเนินการ</p>}
             </div>
             <div className="space-y-3">
@@ -193,9 +214,16 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
             </div>
             <div className="space-y-2 border-t pt-4">
               <Label htmlFor="data-confirmation">3. พิมพ์ “{expectedPhrase}” เพื่อยืนยัน</Label>
-              <Input id="data-confirmation" autoComplete="off" value={phrase} onChange={(e) => setPhrase(e.target.value)} disabled={busy} />
+              <Input id="data-confirmation" autoComplete="off" aria-describedby="data-confirmation-status" value={phrase} onChange={(e) => setPhrase(e.target.value)} disabled={busy} />
+              <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+                <p id="data-confirmation-status" role="status" aria-live="polite">{busy ? "กำลังดำเนินการ กรุณารอสักครู่" : confirmationBlocker || `ตรวจไฟล์แล้ว พร้อมกด “${expectedPhrase}”`}</p>
+                {!verified && <Button variant="outline" className="h-auto min-h-11 whitespace-normal" disabled={busy} onClick={() => {
+                  verifyInput.current?.scrollIntoView({ block: "center" });
+                  verifyInput.current?.focus({ preventScroll: true });
+                }}>ไปเลือกไฟล์สำรอง (.json) ในขั้นตอนที่ 1</Button>}
+              </div>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Button variant="destructive" className="h-auto min-h-11 whitespace-normal" disabled={busy || !verified || phrase !== expectedPhrase || !maintenance?.active} onClick={() => void execute()}>{expectedPhrase}</Button>
+                <Button variant="destructive" className="h-auto min-h-11 whitespace-normal" disabled={busy || Boolean(confirmationBlocker)} onClick={() => void execute()}>{expectedPhrase}</Button>
                 <Button variant="outline" className="h-auto min-h-11 whitespace-normal" disabled={busy} onClick={() => void cancel()}>{pending.recovery ? "ยกเลิกและคงการพักรับข้อมูล" : "ยกเลิกและเปิดรับข้อมูล"}</Button>
               </div>
             </div>
@@ -206,7 +234,11 @@ export function BackupRestore({ userDoc }: { userDoc: UserDoc }) {
         <CardHeader><CardTitle className="flex items-center gap-2"><Download className="h-5 w-5" />สำรองข้อมูลทั้งหมด</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">ดาวน์โหลดไฟล์ JSON ครบทั้งรายชื่อ ประวัติ ผลประเมิน และการตั้งค่า เก็บไฟล์ไว้ในที่ปลอดภัยเพราะมีข้อมูลส่วนบุคคล ระบบจะพักรับข้อมูลชั่วคราวระหว่างอ่านข้อมูล</p>
-          <Button disabled={disabled} onClick={() => begin("backup")}><Download className="h-4 w-4" />ดาวน์โหลดไฟล์สำรอง</Button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button disabled={disabled} onClick={() => begin("backup")}><Download className="h-4 w-4" />ดาวน์โหลดไฟล์สำรอง</Button>
+            <Button variant="outline" disabled={disabled} onClick={() => exportExcel()}><FileSpreadsheet className="h-4 w-4" />ส่งออก Excel (.xlsx)</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">JSON สำหรับกู้คืนระบบ ส่วน Excel แยกชีตข้อมูลสำหรับอ่านและทำรายงาน</p>
           <p className="text-xs text-muted-foreground">ไฟล์นี้สำรองข้อมูลในระบบ ไม่รวมบัญชีเข้าสู่ระบบ Firebase Authentication</p>
         </CardContent>
       </Card>

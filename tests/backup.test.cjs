@@ -65,6 +65,48 @@ test('restore preserves operator identity and every current top admin', async ()
   assert.throws(() => format.validateRestoreAccounts(differentEmail, current, uid));
 });
 
+test('Excel export covers every collection and preserves readable values without mutating backup', async () => {
+  const excel = loadSource('backup-excel', { './backup-format': format });
+  const backup = await create();
+  backup.collections.users[1].data.studentId = '00123';
+  backup.collections.users[1].data.fullName = '=HYPERLINK("https://example.org")';
+  backup.collections.tasks[0].data = {
+    id: 'stored-id', zero: 0, no: false, empty: '', nil: null,
+    nested: [null, false, { members: ['student'] }],
+    createdAt: Date.UTC(2026, 9, 1, 0, 0, 0),
+    checkedAt: { $timestamp: [Date.UTC(2026, 9, 1, 0, 0, 0) / 1000, 123000] },
+    toString: 'custom field',
+  };
+  backup.collections.sessions = [];
+  const original = JSON.stringify(backup);
+  const sheets = excel.buildBackupExcelSheets(backup);
+  assert.equal(sheets.length, format.COLLECTION_NAMES.length + 1);
+  const names = sheets.map((sheet) => sheet.name.slice(0, 31).replace(/[\\/?*[\]]/g, '_'));
+  assert.equal(new Set(names).size, names.length);
+  for (const [index, name] of format.COLLECTION_NAMES.entries()) {
+    assert.equal(sheets[index + 1].rows.length, backup.collections[name].length);
+    assert.equal(sheets[index + 1].headers[0], 'รหัสเอกสาร');
+  }
+  const tasks = sheets.find((sheet) => sheet.name === format.BACKUP_COLLECTIONS.tasks);
+  const cell = (header) => tasks.rows[0][tasks.headers.indexOf(header)];
+  assert.equal(cell('รหัสเอกสาร'), 'old');
+  assert.equal(cell('id'), 'stored-id');
+  assert.equal(cell('zero'), 0);
+  assert.equal(cell('no'), 'ไม่ใช่');
+  assert.equal(cell('nil'), 'null');
+  assert.equal(cell('empty'), '');
+  assert.equal(cell('toString'), 'custom field');
+  assert.deepEqual(JSON.parse(cell('nested')), backup.collections.tasks[0].data.nested);
+  assert.match(cell('วันที่สร้าง'), /07:00:00/);
+  assert.equal(cell('วันที่สร้าง'), cell('วันที่ตรวจ'));
+  const users = sheets.find((sheet) => sheet.name === format.BACKUP_COLLECTIONS.users);
+  assert.equal(users.rows[1][users.headers.indexOf('เลขนักเรียน')], '00123');
+  assert.equal(users.rows[1][users.headers.indexOf('ชื่อ-นามสกุล')], backup.collections.users[1].data.fullName);
+  assert.equal(JSON.stringify(backup), original);
+  backup.collections.tasks[0].data.long = 'x'.repeat(32768);
+  assert.throws(() => excel.buildBackupExcelSheets(backup), /เกินขนาดเซลล์ Excel/);
+});
+
 function memoryService() {
   let store = new Map();
   let writes = 0;
