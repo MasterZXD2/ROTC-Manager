@@ -29,6 +29,76 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/config/global).data;
     }
 
+
+    // Maintenance is explicit and never expires automatically after a partial write.
+    function maintenanceActive() {
+      return exists(/databases/$(database)/documents/config/maintenance)
+        && get(/databases/$(database)/documents/config/maintenance).data.active == true;
+    }
+    function canWriteNormally() { return !maintenanceActive(); }
+    function maintenanceOwner() {
+      let before = get(/databases/$(database)/documents/config/maintenance).data;
+      let after = getAfter(/databases/$(database)/documents/config/maintenance).data;
+      return isTopAdmin() && maintenanceActive()
+        && before.ownerUid == request.auth.uid
+        && before.operation in ["reset", "restore"]
+        && after.active == true && after.ownerUid == before.ownerUid
+        && after.operation == before.operation && after.operationId == before.operationId
+        && after.writeSequence == before.writeSequence + 1;
+    }
+
+    match /config/maintenance {
+      allow read: if isSignedIn();
+      allow create, update: if isTopAdmin()
+        && request.resource.data.keys().hasOnly(["active", "ownerUid", "operation", "operationId", "writeSequence", "updatedAt"])
+        && request.resource.data.active is bool
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.operationId is string
+        && request.resource.data.operationId.size() > 0
+        && request.resource.data.writeSequence is int
+        && request.resource.data.writeSequence >= 0
+        && request.resource.data.updatedAt is int
+        && (request.resource.data.active == false
+          || (!maintenanceActive() && request.resource.data.operation in ["backup", "reset", "restore"])
+          || (maintenanceActive() && request.resource.data.operation == "restore")
+          || maintenanceOwner());
+    }
+
+    // Only the operator may restore historical data; normal student rules remain strict.
+    match /{collectionName}/{documentId} {
+      allow read: if isTopAdmin() && collectionName == "sessions";
+      allow write: if maintenanceOwner() && collectionName in [
+        "pendingStudents", "groups", "yearConfigs", "blockedUsers", "checkins",
+        "activities", "activityCheckins", "tasks", "taskCompletions", "dutyLogs",
+        "attendanceExemptions", "activityExemptions", "characterEvaluations",
+        "swapRequests", "sessions", "emergencyCodes", "activityEmergencyCodes",
+        "inviteCodes", "activityLogs"
+      ];
+      allow write: if maintenanceOwner() && collectionName == "config" && documentId != "maintenance";
+    }
+    match /users/{uid} {
+      function validRestoredUser() {
+        return request.resource.data.uid == uid
+          && request.resource.data.email is string
+          && request.resource.data.role in ["student", "admin_student", "admin_teacher", "admin", "top_admin"]
+          && request.resource.data.year is int
+          && request.resource.data.year >= 0 && request.resource.data.year <= 5;
+      }
+      allow create: if maintenanceOwner() && validRestoredUser();
+      allow update: if maintenanceOwner() && validRestoredUser()
+        && request.resource.data.email == resource.data.email
+        && (resource.data.role != "top_admin" || request.resource.data.role == "top_admin");
+      allow delete: if maintenanceOwner() && uid != request.auth.uid
+        && resource.data.role != "top_admin"
+        && resource.data.email.lower() != bootstrapEmail().lower();
+    }
+    match /users/{uid}/dailyCheckins/{day} {
+      allow write: if maintenanceOwner();
+    }
+    match /{parent=**}/dailyCheckins/{day} {
+      allow read: if isTopAdmin();
+    }
+
     // ===== users =====
     match /users/{uid} {
       allow get: if isSignedIn() && (
@@ -40,15 +110,15 @@ service cloud.firestore {
       // create — register ครั้งแรก
       // - role = "student" ปกติ
       // - bootstrap email สามารถ create ตัวเองเป็น top_admin
-      allow create: if self(uid)
+      allow create: if canWriteNormally() && (self(uid)
         && request.resource.data.uid == uid
         && request.resource.data.email == request.auth.token.email
         && (
           request.resource.data.role == "student"
           || (request.resource.data.role == "top_admin" && emailMatches(bootstrapEmail()))
-        );
+        ));
 
-      allow update: if isSignedIn() && (
+      allow update: if canWriteNormally() && (isSignedIn() && (
         // case 1: self update profile (อนุญาตเปลี่ยน year ตอน register)
         (self(uid)
           && request.resource.data.uid == resource.data.uid
@@ -84,25 +154,25 @@ service cloud.firestore {
           && request.resource.data.year is int
           && request.resource.data.year >= 1
           && request.resource.data.year <= 5)
-      );
+      ));
 
       // delete — top_admin ทุกคน, admin_teacher ลบ student ในชั้นปีตัวเอง
-      allow delete: if isSignedIn()
+      allow delete: if canWriteNormally() && (isSignedIn()
         && !self(uid)
         && resource.data.email.lower() != bootstrapEmail().lower()
         && (
           isTopAdmin()
           || (isAdminTeacher() && resource.data.role == "student"
               && resource.data.year == myYear())
-        );
+        ));
     }
 
     // ===== blockedUsers/{uid} — UID ที่ถูก admin ลบ (ป้องกัน login กลับ) =====
     match /blockedUsers/{uid} {
       allow get: if isSignedIn() && self(uid);
       allow list: if isTopAdmin();
-      allow create, update: if isTopAdmin() || isAdminLevel();
-      allow delete: if isTopAdmin();
+      allow create, update: if canWriteNormally() && (isTopAdmin() || isAdminLevel());
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== users/{uid}/dailyCheckins/{YYYY-MM-DD} =====
@@ -113,22 +183,22 @@ service cloud.firestore {
         return userDoc(uid).get("isTester", false) == true;
       }
 
-      allow create: if self(uid)
-        && request.resource.data.count == 1;
+      allow create: if canWriteNormally() && (self(uid)
+        && request.resource.data.count == 1);
 
       // เช็คอิน/เช็คเอาท์ — สูงสุด 2 ครั้ง/วัน (เริ่ม + จบ)
-      allow update: if self(uid)
+      allow update: if canWriteNormally() && (self(uid)
         && request.resource.data.count == resource.data.count + 1
-        && (isTester() || request.resource.data.count <= 2);
+        && (isTester() || request.resource.data.count <= 2));
 
-      allow delete: if isTopAdmin();
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== config/global =====
     match /config/{docId} {
       allow read: if isSignedIn();
-      allow create: if isTopAdmin() || emailMatches(bootstrapEmail());
-      allow update, delete: if isTopAdmin();
+      allow create: if docId != "maintenance" && canWriteNormally() && (isTopAdmin() || emailMatches(bootstrapEmail()));
+      allow update, delete: if docId != "maintenance" && canWriteNormally() && (isTopAdmin());
     }
 
     // ===== checkins =====
@@ -140,7 +210,7 @@ service cloud.firestore {
       );
       allow list: if isSignedIn();
 
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasAll([
           "id", "userId", "fullName", "nickname", "classroom", "year",
@@ -149,11 +219,11 @@ service cloud.firestore {
         ])
         && request.resource.data.method in ["gps", "emergency_code", "tester"]
         && request.resource.data.timestamp >= request.time.toMillis() - 60000
-        && request.resource.data.timestamp <= request.time.toMillis() + 60000;
+        && request.resource.data.timestamp <= request.time.toMillis() + 60000);
 
-      allow update: if false;
-      allow delete: if isTopAdmin()
-        || (isAdminLevel() && resource.data.year == myYear());
+      allow update: if canWriteNormally() && (false);
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear()));
     }
 
     // ===== emergencyCodes/{code} — รหัสเช็คอินฉุกเฉิน =====
@@ -162,24 +232,24 @@ service cloud.firestore {
       allow list: if isAnyAdmin();
 
       // สร้างได้: top_admin + admin_teacher (admin_student ห้ามสร้าง)
-      allow create: if (isTopAdmin() || isAdminTeacher() || isAdminLevel())
+      allow create: if canWriteNormally() && ((isTopAdmin() || isAdminTeacher() || isAdminLevel())
         && request.resource.data.code == code
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.used == false
         && request.resource.data.expiresAt > request.time.toMillis()
-        && request.resource.data.expiresAt <= request.time.toMillis() + 5 * 60 * 1000;
+        && request.resource.data.expiresAt <= request.time.toMillis() + 5 * 60 * 1000);
 
-      allow update: if isSignedIn()
+      allow update: if canWriteNormally() && (isSignedIn()
         && resource.data.used == false
         && request.resource.data.used == true
         && request.resource.data.usedBy == request.auth.uid
         && request.resource.data.code == resource.data.code
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.year == resource.data.year
-        && request.time.toMillis() <= resource.data.expiresAt;
+        && request.time.toMillis() <= resource.data.expiresAt);
 
-      allow delete: if isTopAdmin()
-        || (isAdminLevel() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear()));
     }
 
     // ===== inviteCodes/{code} — รหัส login ตอน register (ใช้ได้หลายคนจนกว่าจะหมดเวลา) =====
@@ -188,7 +258,7 @@ service cloud.firestore {
       allow list: if isAnyAdmin();
 
       // top_admin สร้างได้ทุกชั้นปี (year=null), admin_teacher สร้างได้เฉพาะชั้นปีตัวเอง
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.code == code
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.expiresAt > request.time.toMillis()
@@ -198,11 +268,11 @@ service cloud.firestore {
           || (isAdminTeacher()
               && request.resource.data.year == myYear()
               && request.resource.data.year != null)
-        );
+        ));
 
       // ใช้ซ้ำได้ — ไม่ต้อง mark used
-      allow update: if false;
-      allow delete: if isTopAdmin();
+      allow update: if canWriteNormally() && (false);
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== tasks/{taskId} — งานนักศึกษาวิชาทหาร แยกตามชั้นปี =====
@@ -210,7 +280,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create/update — admin_student ในชั้นปีเดียวกัน หรือ admin_teacher / top_admin
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == taskId
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.year is int
@@ -220,19 +290,19 @@ service cloud.firestore {
           isTopAdmin()
           || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
               && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow update: if isSignedIn()
+      allow update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.year == resource.data.year
         && (
           isTopAdmin()
           || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
               && resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
+      allow delete: if canWriteNormally() && (isTopAdmin()
         || ((isAdminStudent() || isAdminTeacher() || isAdminLevel())
-            && resource.data.year == myYear());
+            && resource.data.year == myYear()));
     }
 
     // ===== taskCompletions/{completionId} — การติ๊กว่านักเรียนทำงานนี้แล้ว =====
@@ -240,15 +310,15 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == completionId
         && request.resource.data.checkedBy == request.auth.uid
         && (
           isTopAdmin()
           || (isAnyAdmin() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow update: if isSignedIn()
+      allow update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.checkedBy == request.auth.uid
         && request.resource.data.taskId == resource.data.taskId
         && request.resource.data.studentUid == resource.data.studentUid
@@ -256,17 +326,17 @@ service cloud.firestore {
         && (
           isTopAdmin()
           || (isAnyAdmin() && resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear()));
     }
 
     // ===== yearConfigs/{yearN} — เกณฑ์ผ่าน % ต่อชั้นปี (admin_teacher ตั้ง) =====
     match /yearConfigs/{yearId} {
       allow read: if isSignedIn();
 
-      allow create, update: if isSignedIn()
+      allow create, update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.year is int
         && request.resource.data.passingPercent is int
         && request.resource.data.passingPercent >= 0
@@ -274,9 +344,9 @@ service cloud.firestore {
         && (
           isTopAdmin()
           || (isAdminTeacher() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin();
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== pendingStudents/{studentId} — ข้อมูลที่ admin pre-create ก่อน register =====
@@ -285,7 +355,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create/update — admin_teacher (ในชั้นปีตัวเอง) + top_admin
-      allow create, update: if isSignedIn()
+      allow create, update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.studentId == studentId
         && request.resource.data.year is int
         && request.resource.data.year >= 1
@@ -294,10 +364,10 @@ service cloud.firestore {
         && (
           isTopAdmin()
           || (isAdminTeacher() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAdminTeacher() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminTeacher() && resource.data.year == myYear()));
     }
 
     // ===== groups/{groupId} — กลุ่มจราจร (ตั้งชื่อแค่ตัวเลข, มี checkbox) =====
@@ -306,29 +376,29 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create + update ทุก field — admin_teacher + top_admin
-      allow create: if (isAdminTeacher() || isTopAdmin())
+      allow create: if canWriteNormally() && ((isAdminTeacher() || isTopAdmin())
         && request.resource.data.id == groupId
         && request.resource.data.number is int
         && request.resource.data.number >= 1
         && request.resource.data.year is int
         && request.resource.data.memberUids is list
-        && request.resource.data.members is list;
+        && request.resource.data.members is list);
 
-      allow update: if (isAdminTeacher() || isTopAdmin())
+      allow update: if canWriteNormally() && ((isAdminTeacher() || isTopAdmin())
         && request.resource.data.id == groupId
         && request.resource.data.number is int
         && request.resource.data.number >= 1
         && request.resource.data.year is int
         && request.resource.data.memberUids is list
-        && request.resource.data.members is list;
+        && request.resource.data.members is list);
 
       // admin_student เช็คได้ทุกกลุ่ม — เฉพาะ field เช็ค (ไม่ให้แก้รายชื่อสมาชิก)
-      allow update: if isAdminStudent()
+      allow update: if canWriteNormally() && (isAdminStudent()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
              ["checkStatus", "checkedBy", "checkedByName", "checkedAt", "updatedAt"]
-           );
+           ));
 
-      allow delete: if isAnyAdmin();
+      allow delete: if canWriteNormally() && (isAnyAdmin());
     }
 
     // ===== swapRequests/{requestId} — คำขอสลับเวร =====
@@ -336,21 +406,21 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // student create — ตัวเองเป็นคนขอ + status = pending
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == requestId
         && request.resource.data.requestedBy == request.auth.uid
-        && request.resource.data.status == "pending";
+        && request.resource.data.status == "pending");
 
       // update — เฉพาะ admin_teacher / top_admin (อนุมัติ/ปฏิเสธ)
       // หรือเจ้าของขอยกเลิก (เปลี่ยน status เป็น "rejected" ของตัวเอง)
-      allow update: if isSignedIn() && (
+      allow update: if canWriteNormally() && (isSignedIn() && (
         isAdminTeacher() || isTopAdmin()
         || (resource.data.requestedBy == request.auth.uid
             && resource.data.status == "pending"
             && request.resource.data.status == "rejected")
-      );
+      ));
 
-      allow delete: if isTopAdmin();
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== activityLogs/{logId} — บันทึกการกระทำทั้งหมด (checkin, เวร, tasks, role change) =====
@@ -363,7 +433,7 @@ service cloud.firestore {
       allow list: if isAnyAdmin();
 
       // create — ทุกคนที่ login เขียนได้ (log การกระทำตัวเอง)
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == logId
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.timestamp >= request.time.toMillis() - 5000
@@ -373,11 +443,11 @@ service cloud.firestore {
           "swap_request", "swap_approve", "swap_reject",
           "group_create", "group_update", "group_delete",
           "role_change", "delete_user", "config_change"
-        ];
+        ]);
 
-      allow update: if false;
+      allow update: if canWriteNormally() && (false);
       // delete — top_admin ลบได้ (cleanup เก่ากว่า 90 วัน)
-      allow delete: if isTopAdmin();
+      allow delete: if canWriteNormally() && (isTopAdmin());
     }
 
     // ===== dutyLogs/{dayKey_groupId} — ประวัติเวรรายวัน (กลุ่มไหนเข้าเวรวันไหน) =====
@@ -385,16 +455,16 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin (สร้างตอนติ๊กกลุ่ม)
-      allow create, update: if isSignedIn()
+      allow create, update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == logId
         && request.resource.data.year is int
         && (
           isTopAdmin()
           || (isAnyAdmin() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear()));
     }
 
     // ===== attendanceExemptions/{dayKey_uid} — ยกเว้นการขาด (นับเป็นมาแทน) =====
@@ -402,24 +472,24 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // create/update — admin ในชั้นปีเดียวกัน หรือ top_admin
-      allow create, update: if isSignedIn()
+      allow create, update: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == exemptionId
         && request.resource.data.exemptedBy == request.auth.uid
         && request.resource.data.year is int
         && (
           isTopAdmin()
           || (isAnyAdmin() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear()));
     }
 
     // ===== activities/{activityId} — กิจกรรมเช็คอิน =====
     match /activities/{activityId} {
       allow read: if isSignedIn();
 
-      allow create: if (isAdminLevel() || isTopAdmin())
+      allow create: if canWriteNormally() && ((isAdminLevel() || isTopAdmin())
         && request.resource.data.id == activityId
         && request.resource.data.year is int
         && request.resource.data.radiusMeters is int
@@ -428,13 +498,13 @@ service cloud.firestore {
         && request.resource.data.locations is list
         && request.resource.data.isOpen is bool
         && (!("isVisible" in request.resource.data) || request.resource.data.isVisible is bool)
-        && (isTopAdmin() || request.resource.data.year == myYear());
+        && (isTopAdmin() || request.resource.data.year == myYear()));
 
-      allow update: if (isAdminLevel() || isTopAdmin())
-        && (isTopAdmin() || resource.data.year == myYear());
+      allow update: if canWriteNormally() && ((isAdminLevel() || isTopAdmin())
+        && (isTopAdmin() || resource.data.year == myYear()));
 
-      allow delete: if isTopAdmin()
-        || (isAdminLevel() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear()));
     }
 
     // ===== activityCheckins/{checkinId} — การเช็คอินกิจกรรม =====
@@ -444,17 +514,17 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
 
-      allow create: if isSignedIn()
+      allow create: if canWriteNormally() && (isSignedIn()
         && request.resource.data.id == checkinId
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.activityId is string
         && request.resource.data.method in ["gps", "emergency_code"]
         && get(/databases/$(database)/documents/activities/$(request.resource.data.activityId)).data.isOpen == true
         && request.resource.data.timestamp >= request.time.toMillis() - 60000
-        && request.resource.data.timestamp <= request.time.toMillis() + 60000;
+        && request.resource.data.timestamp <= request.time.toMillis() + 60000);
 
-      allow delete: if isTopAdmin()
-        || (isAdminLevel() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear()));
     }
 
     // ===== activityEmergencyCodes/{code} — รหัสฉุกเฉินกิจกรรม =====
@@ -462,46 +532,46 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow list: if isAnyAdmin();
 
-      allow create: if (isAdminLevel() || isTopAdmin())
+      allow create: if canWriteNormally() && ((isAdminLevel() || isTopAdmin())
         && request.resource.data.code == code
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.used == false
         && request.resource.data.expiresAt > request.time.toMillis()
-        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000;
+        && request.resource.data.expiresAt <= request.time.toMillis() + 10 * 60 * 1000);
 
-      allow update: if isSignedIn()
+      allow update: if canWriteNormally() && (isSignedIn()
         && resource.data.used == false
         && request.resource.data.used == true
         && request.resource.data.usedBy == request.auth.uid
         && get(/databases/$(database)/documents/activities/$(resource.data.activityId)).data.isOpen == true
-        && request.time.toMillis() <= resource.data.expiresAt;
+        && request.time.toMillis() <= resource.data.expiresAt);
 
-      allow delete: if isTopAdmin()
-        || (isAdminLevel() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAdminLevel() && resource.data.year == myYear()));
     }
 
     // ===== activityExemptions/{exemptionId} — ยกเว้นกิจกรรม =====
     match /activityExemptions/{exemptionId} {
       allow read: if isSignedIn();
 
-      allow create, update: if (isAdminLevel() || isTopAdmin())
+      allow create, update: if canWriteNormally() && ((isAdminLevel() || isTopAdmin())
         && request.resource.data.id == exemptionId
         && request.resource.data.exemptedBy == request.auth.uid
         && request.resource.data.year is int
         && (
           isTopAdmin()
           || (isAnyAdmin() && request.resource.data.year == myYear())
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear()));
     }
 
     // ===== characterEvaluations/{year_uid} — วัดผลคุณลักษณะรายคน =====
     match /characterEvaluations/{evaluationId} {
       allow read: if isSignedIn();
 
-      allow create, update: if isAnyAdmin()
+      allow create, update: if canWriteNormally() && (isAnyAdmin()
         && request.resource.data.id == evaluationId
         && request.resource.data.studentUid is string
         && request.resource.data.year is int
@@ -510,10 +580,10 @@ service cloud.firestore {
         && (
           isTopAdmin()
           || request.resource.data.year == myYear()
-        );
+        ));
 
-      allow delete: if isTopAdmin()
-        || (isAnyAdmin() && resource.data.year == myYear());
+      allow delete: if canWriteNormally() && (isTopAdmin()
+        || (isAnyAdmin() && resource.data.year == myYear()));
     }
   }
 }

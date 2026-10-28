@@ -10,6 +10,7 @@ import {
   genCode,
   FV,
   DAILY_CHECKIN_CAP,
+  assertNotInMaintenance,
 } from "./shared";
 
 type GlobalConfig = {
@@ -95,6 +96,7 @@ async function recordCheckin(opts: {
   const counterRef = db.doc(`users/${uid}/dailyCheckins/${dayKey}`);
 
   await db.runTransaction(async (tx) => {
+    await assertNotInMaintenance(tx);
     const counter = await tx.get(counterRef);
     const used = (counter.data()?.count as number) ?? 0;
     if (used >= DAILY_CHECKIN_CAP) {
@@ -194,15 +196,18 @@ export const requestEmergencyCode = onCall(
     const code = genCode();
     const expiresAt = Date.now() + 5 * 60 * 1000;
 
-    await db.collection("emergencyCodes").doc(code).set({
-      code,
-      createdBy: caller.uid,
-      createdByName: caller.fullName || caller.email,
-      year: targetYear,
-      classroom: classroom ?? null,
-      expiresAt,
-      used: false,
-      createdAt: FV.serverTimestamp(),
+    await db.runTransaction(async (tx) => {
+      await assertNotInMaintenance(tx);
+      tx.set(db.collection("emergencyCodes").doc(code), {
+        code,
+        createdBy: caller.uid,
+        createdByName: caller.fullName || caller.email,
+        year: targetYear,
+        classroom: classroom ?? null,
+        expiresAt,
+        used: false,
+        createdAt: FV.serverTimestamp(),
+      });
     });
 
     return { code, expiresAt };
@@ -232,6 +237,7 @@ export const submitCheckinWithCode = onCall(
     const fallbackAcc = typeof accuracy === "number" ? accuracy : 9999;
 
     const claim = await db.runTransaction(async (tx) => {
+      await assertNotInMaintenance(tx);
       const snap = await tx.get(codeRef);
       if (!snap.exists) throw new HttpsError("not-found", "รหัสไม่ถูกต้อง");
       const c = snap.data()!;

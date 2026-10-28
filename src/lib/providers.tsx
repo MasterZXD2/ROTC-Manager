@@ -7,6 +7,7 @@ import { ThemeProvider } from "./theme-context";
 import { PwaRegister } from "@/components/PwaRegister";
 import { ToastProvider } from "@/components/ToastProvider";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
+import { MaintenanceNotice } from "@/components/MaintenanceNotice";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [qc] = useState(
@@ -24,6 +25,7 @@ export function Providers({ children }: { children: ReactNode }) {
           <ConfirmProvider>
             <PwaRegister />
             <ToastProvider />
+            <MaintenanceNotice />
             {children}
           </ConfirmProvider>
         </AuthProvider>

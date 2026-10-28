@@ -1,6 +1,6 @@
 import { beforeUserCreated } from "firebase-functions/v2/identity";
 import { HttpsError } from "firebase-functions/v2/https";
-import { db, BOOTSTRAP_TOP_ADMIN_EMAIL, REGION, DEFAULT_CONFIG, FV } from "./shared";
+import { db, BOOTSTRAP_TOP_ADMIN_EMAIL, REGION, DEFAULT_CONFIG, FV, assertNotInMaintenance } from "./shared";
 
 /**
  * ก่อนสร้าง user — ถ้าเป็น email bootstrap ทำให้ doc มี role=top_admin ตั้งแต่แรก
@@ -16,31 +16,30 @@ export const onUserSignup = beforeUserCreated(
     const role = isBootstrap ? "top_admin" : "student";
 
     const userRef = db.collection("users").doc(user.uid);
-    const snap = await userRef.get();
-
-    if (!snap.exists) {
-      await userRef.set({
-        uid: user.uid,
-        email: user.email,
-        role,
-        fullName: "",
-        nickname: "",
-        classroom: "",
-        studentId: "",
-        year: 0,
-        photoURL: user.photoURL ?? null,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-    }
-
-    if (isBootstrap) {
+    await db.runTransaction(async (tx) => {
+      await assertNotInMaintenance(tx);
+      const snap = await tx.get(userRef);
       const cfgRef = db.doc("config/global");
-      const cfgSnap = await cfgRef.get();
-      if (!cfgSnap.exists) {
-        await cfgRef.set({ ...DEFAULT_CONFIG, createdAt: FV.serverTimestamp() });
+      const cfgSnap = isBootstrap ? await tx.get(cfgRef) : null;
+
+      if (!snap.exists) {
+        tx.set(userRef, {
+          uid: user.uid,
+          email: user.email,
+          role,
+          fullName: "",
+          nickname: "",
+          classroom: "",
+          studentId: "",
+          year: 0,
+          photoURL: user.photoURL ?? null,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
       }
-    }
+
+      if (isBootstrap && !cfgSnap?.exists) tx.set(cfgRef, { ...DEFAULT_CONFIG, createdAt: FV.serverTimestamp() });
+    });
 
     return { customClaims: { role } };
   },

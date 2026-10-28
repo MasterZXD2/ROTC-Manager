@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test:backup": "node --test tests/backup.test.cjs",
     "deploy:rules": "firebase deploy --only firestore:rules,firestore:indexes",
     "deploy:hosting": "next build && firebase deploy --only hosting",
     "deploy": "npm run deploy:rules && npm run deploy:hosting"

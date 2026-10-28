@@ -1,5 +1,5 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { db, REGION } from "./shared";
+import { db, REGION, assertNotInMaintenance } from "./shared";
 
 /**
  * รันทุกคืน (เวลาไทย 02:00) — ลบ check-in ที่เก่ากว่า historyRetentionDays
@@ -29,9 +29,10 @@ export const cleanupOldCheckins = onSchedule(
         .limit(batchSize)
         .get();
       if (q.empty) break;
-      const batch = db.batch();
-      q.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+      await db.runTransaction(async (tx) => {
+        await assertNotInMaintenance(tx);
+        q.docs.forEach((d) => tx.delete(d.ref));
+      });
       totalDeleted += q.size;
       if (q.size < batchSize) break;
     }
@@ -45,9 +46,10 @@ export const cleanupOldCheckins = onSchedule(
         .limit(batchSize)
         .get();
       if (q.empty) break;
-      const batch = db.batch();
-      q.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+      await db.runTransaction(async (tx) => {
+        await assertNotInMaintenance(tx);
+        q.docs.forEach((d) => tx.delete(d.ref));
+      });
       if (q.size < batchSize) break;
     }
 

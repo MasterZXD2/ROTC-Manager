@@ -16,7 +16,6 @@ import Link from "next/link";
 import { cleanupOldCheckins } from "@/lib/actions";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
-import { BackupRestore } from "@/components/BackupRestore";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 function ConfigInner() {
@@ -309,7 +308,13 @@ function ConfigInner() {
           </CardContent>
         </Card>
 
-        {userDoc && <BackupRestore userDoc={userDoc} />}
+        <Card>
+          <CardHeader><CardTitle className="text-base">สำรองข้อมูลและเปลี่ยนเทอม</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">สำรองข้อมูลทั้งหมด กู้คืนจากไฟล์ หรือเริ่มเทอมใหม่โดยเก็บบัญชีและรายชื่อนักเรียนไว้</p>
+            <Button asChild variant="outline"><Link href="/top-admin/data">เปิดหน้าจัดการข้อมูล</Link></Button>
+          </CardContent>
+        </Card>
 
         <div className="sticky bottom-0 -mx-4 border-t bg-background p-4">
           <Button size="lg" className="w-full" onClick={save} disabled={saving}>

@@ -1,6 +1,6 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getAuth } from "firebase-admin/auth";
-import { db, REGION, BOOTSTRAP_TOP_ADMIN_EMAIL } from "./shared";
+import { db, REGION, BOOTSTRAP_TOP_ADMIN_EMAIL, assertNotInMaintenance } from "./shared";
 
 type Role = "student" | "admin" | "top_admin";
 
@@ -43,7 +43,10 @@ export const setUserRole = onCall(
       throw new HttpsError("failed-precondition", "ห้ามลดสิทธิ์ Top Admin หลัก");
     }
 
-    await targetRef.update({ role, updatedAt: Date.now() });
+    await db.runTransaction(async (tx) => {
+      await assertNotInMaintenance(tx);
+      tx.update(targetRef, { role, updatedAt: Date.now() });
+    });
     await getAuth().setCustomUserClaims(targetUid, { role });
     return { ok: true };
   },
@@ -96,13 +99,17 @@ export const deleteUserAndCheckins = onCall(
         .limit(batchSize)
         .get();
       if (q.empty) break;
-      const batch = db.batch();
-      q.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
+      await db.runTransaction(async (tx) => {
+        await assertNotInMaintenance(tx);
+        q.docs.forEach((d) => tx.delete(d.ref));
+      });
       if (q.size < batchSize) break;
     }
 
-    await targetRef.delete();
+    await db.runTransaction(async (tx) => {
+      await assertNotInMaintenance(tx);
+      tx.delete(targetRef);
+    });
     try {
       await getAuth().deleteUser(targetUid);
     } catch (e) {

@@ -1,10 +1,18 @@
 import { initializeApp, getApps } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, type Transaction } from "firebase-admin/firestore";
+import { HttpsError } from "firebase-functions/v2/https";
 
 if (!getApps().length) initializeApp();
 
 export const db = getFirestore();
 export const FV = FieldValue;
+
+// Read inside each write transaction so starting maintenance also stops in-flight work.
+export async function assertNotInMaintenance(tx: Transaction): Promise<void> {
+  if ((await tx.get(db.doc("config/maintenance"))).data()?.active) {
+    throw new HttpsError("unavailable", "ผู้ดูแลกำลังจัดการข้อมูล กรุณาลองใหม่ภายหลัง");
+  }
+}
 
 export const REGION = "asia-southeast1";
 export const BOOTSTRAP_TOP_ADMIN_EMAIL = "goten8615xd@gmail.com";
