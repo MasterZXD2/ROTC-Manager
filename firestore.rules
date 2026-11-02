@@ -81,6 +81,7 @@ service cloud.firestore {
         return request.resource.data.uid == uid
           && request.resource.data.email is string
           && request.resource.data.role in ["student", "admin_student", "admin_teacher", "admin", "top_admin"]
+          && request.resource.data.get("status", "student") in ["student", "leader", "teacher"]
           && request.resource.data.year is int
           && request.resource.data.year >= 0 && request.resource.data.year <= 5;
       }
@@ -116,7 +117,9 @@ service cloud.firestore {
         && (
           request.resource.data.role == "student"
           || (request.resource.data.role == "top_admin" && emailMatches(bootstrapEmail()))
-        ));
+        )
+        && request.resource.data.get("status", "student") in ["student", "leader", "teacher"]
+        && (request.resource.data.get("status", "student") == "student" || emailMatches(bootstrapEmail())));
 
       allow update: if canWriteNormally() && (isSignedIn() && (
         // case 1: self update profile (อนุญาตเปลี่ยน year ตอน register)
@@ -126,6 +129,8 @@ service cloud.firestore {
           && request.resource.data.role == resource.data.role
           && (request.resource.data.get("isTester", false) == resource.data.get("isTester", false))
           && (request.resource.data.get("isTrafficRepair", false) == resource.data.get("isTrafficRepair", false))
+          && (request.resource.data.get("status", null) == resource.data.get("status", null)
+              || (isTopAdmin() && request.resource.data.status in ["student", "leader", "teacher"]))
           && request.resource.data.year is int
           && request.resource.data.year >= 0
           && request.resource.data.year <= 5)
@@ -146,11 +151,12 @@ service cloud.firestore {
         (isAdminTeacher()
           && !self(uid)
           && resource.data.year == myYear()
-          && resource.data.role == "student"
+          && (resource.data.get("status", null) in ["student", "leader"] || (resource.data.get("status", null) == null && resource.data.role in ["student", "admin_student"]))
           && request.resource.data.uid == resource.data.uid
           && request.resource.data.email == resource.data.email
           && request.resource.data.role == resource.data.role
           && (request.resource.data.get("isTester", false) == resource.data.get("isTester", false))
+          && (request.resource.data.get("status", null) == resource.data.get("status", null))
           && request.resource.data.year is int
           && request.resource.data.year >= 1
           && request.resource.data.year <= 5)
@@ -162,7 +168,7 @@ service cloud.firestore {
         && resource.data.email.lower() != bootstrapEmail().lower()
         && (
           isTopAdmin()
-          || (isAdminTeacher() && resource.data.role == "student"
+          || (isAdminTeacher() && resource.data.role in ["student", "admin_student"]
               && resource.data.year == myYear())
         ));
     }

@@ -12,6 +12,7 @@ import { Plus, Users, Trash2, Edit2, Loader2, RotateCcw, UserPlus, FileText, Gri
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
 import type { GroupDoc, UserDoc } from "@/lib/types";
+import { isStudentOrLeaderStatus } from "@/lib/profile";
 import {
   createGroup, deleteGroup, renameGroup, addGroupMember, removeGroupMember,
   checkGroup, uncheckGroup, resetAllGroupChecks, reorderGroups,
@@ -52,12 +53,13 @@ export function AdminGroupsTab({
     const q = query(
       collection(db(), "users"),
       where("year", "==", activeYear),
-      where("role", "==", "student"),
+      // รวมทั้ง student และ admin_student
     );
     return onSnapshot(q, (s) =>
       setStudents(
         s.docs
           .map((d) => d.data() as UserDoc)
+          .filter((u) => u.year === activeYear && isStudentOrLeaderStatus(u))
           .sort((a, b) =>
             (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"),
           ),

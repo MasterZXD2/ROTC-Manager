@@ -7,7 +7,8 @@ import { db } from "./firebase";
 import {
   distanceMeters, hhmmToMinutes, nowMinutesBangkok, todayKeyBangkok, googleMapsLink,
 } from "./utils";
-import type { GlobalConfig, GroupDoc, DutyLogDoc, Role, UserDoc } from "./types";
+import type { GlobalConfig, GroupDoc, DutyLogDoc, Role, UserDoc, UserStatus } from "./types";
+import { isStudentOrLeaderStatus } from "./profile";
 
 /* ---------- helpers ---------- */
 
@@ -351,6 +352,32 @@ export async function setUserRole(
   );
 }
 
+/** เปลี่ยนสถานะ (นักเรียน/ครู) — แยกจากสิทธิ์ เฉพาะ Top Admin เท่านั้น */
+export async function setUserStatus(
+  callerUid: string,
+  targetUid: string,
+  status: UserStatus,
+): Promise<void> {
+  if (status !== "student" && status !== "leader" && status !== "teacher") throw new Error("สถานะไม่ถูกต้อง");
+  const caller = await loadProfile(callerUid);
+  if (caller.role !== "top_admin") throw new Error("เฉพาะ Top Admin เท่านั้น");
+
+  const target = await loadProfile(targetUid);
+  await setDoc(
+    doc(db(), "users", targetUid),
+    { ...target, status, updatedAt: Date.now() },
+    { merge: true },
+  );
+
+  await logActivity(
+    callerUid,
+    caller.fullName || caller.email,
+    "status_change",
+    { targetName: target.fullName || target.email, newStatus: status },
+    target.year,
+  );
+}
+
 /* ---------- invite codes (รหัส login ตอน register) ---------- */
 
 export async function createInviteCode(args: {
@@ -432,7 +459,7 @@ export async function setUserTrafficRepair(
   const isTeacher = caller.role === "admin_teacher" || caller.role === "admin";
   const isTop = caller.role === "top_admin";
   if (!isTeacher && !isTop) throw new Error("ไม่มีสิทธิ์");
-  if (isTeacher && (target.role !== "student" || target.year !== caller.year)) {
+  if (isTeacher && (!isStudentOrLeaderStatus(target) || target.year !== caller.year)) {
     throw new Error("ครูตั้งค่าได้เฉพาะนักเรียนในชั้นปีตัวเอง");
   }
 
@@ -465,7 +492,7 @@ export async function updateStudentProfile(
   if (!isTeacher && !isTop) throw new Error("ไม่มีสิทธิ์");
 
   if (isTeacher && !isTop) {
-    if (target.role !== "student") throw new Error("ครูแก้ได้เฉพาะนักเรียน");
+    if (!isStudentOrLeaderStatus(target)) throw new Error("ครูแก้ได้เฉพาะนักเรียน/หัวหน้า");
     if (target.year !== caller.year)
       throw new Error("แก้ได้เฉพาะนักเรียนในชั้นปีตัวเอง");
   }
@@ -497,7 +524,7 @@ export async function deleteUserAndCheckins(
     throw new Error("ห้ามลบ Top Admin หลัก");
 
   if (caller.role === "admin_teacher" || caller.role === "admin") {
-    if (target.role !== "student" || target.year !== caller.year)
+    if (!["student", "admin_student"].includes(target.role) || target.year !== caller.year)
       throw new Error("ครูลบได้เฉพาะนักเรียนในชั้นปีตัวเอง");
   } else if (caller.role !== "top_admin") {
     throw new Error("ไม่มีสิทธิ์");
@@ -1494,7 +1521,7 @@ export async function setCharacterEvaluation(
     throw new Error("ทำได้เฉพาะชั้นปีตัวเอง");
   if (target.year !== data.year)
     throw new Error("ชั้นปีของนักเรียนไม่ตรงกับรายการประเมิน");
-  if (!["student", "admin_student"].includes(target.role))
+  if (!isStudentOrLeaderStatus(target))
     throw new Error("ประเมินได้เฉพาะนักเรียน");
 
   const id = `${data.year}_${data.studentUid}`;

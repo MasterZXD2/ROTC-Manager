@@ -14,6 +14,7 @@ import type { EditorPayload } from "@/lib/editor-bus";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
 import type { TaskDoc, TaskCompletionDoc, UserDoc } from "@/lib/types";
+import { isStudentStatus } from "@/lib/profile";
 
 interface Props {
   callerUid: string;
@@ -45,13 +46,13 @@ export function TasksPanel({ callerUid, year }: Props) {
     const q = query(
       collection(db(), "users"),
       where("year", "==", year),
-      orderBy("fullName"),
     );
     return onSnapshot(q, (s) =>
       setStudents(
         s.docs
           .map((d) => d.data() as UserDoc)
-          .filter((u) => u.role === "student" || u.role === "admin_student"),
+          .filter((u) => u.year === year && isStudentStatus(u))
+          .sort((a, b) => (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th")),
       ),
     );
   }, [year]);

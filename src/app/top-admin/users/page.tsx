@@ -11,6 +11,7 @@ import { Trash2, FlaskConical, UserPlus, Pencil, Upload, Wrench, Download } from
 import {
   deleteUserAndCheckins,
   setUserRole,
+  setUserStatus,
   setUserYear,
   setUserTester,
   setUserTrafficRepair,
@@ -18,14 +19,14 @@ import {
 } from "@/lib/actions";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
-import type { UserDoc, Role } from "@/lib/types";
+import type { UserDoc, Role, UserStatus } from "@/lib/types";
 import { EditUserModal } from "@/components/EditUserModal";
 import { BulkImportModal } from "@/components/BulkImportModal";
 import { RosterExportModal } from "@/components/RosterExportModal";
 import { UserEvaluationTab } from "@/components/UserEvaluationTab";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmProvider";
-import { isProfileComplete } from "@/lib/profile";
+import { isProfileComplete, getUserStatus } from "@/lib/profile";
 
 function UsersInner() {
   const { userDoc: me } = useAuth();
@@ -33,6 +34,7 @@ function UsersInner() {
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
   const [profileFilter, setProfileFilter] = useState<"all" | "incomplete">("all");
   const [sortMode, setSortMode] = useState<"name" | "classroom">("name");
   const [evaluationYearFilter, setEvaluationYearFilter] = useState<string>("");
@@ -70,7 +72,7 @@ function UsersInner() {
     return () => unsub();
   }, []);
 
-  const filtered = useMemo(() => {
+  const baseFiltered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return users.filter((u) => {
       if (yearFilter && String(u.year) !== yearFilter) return false;
@@ -79,16 +81,30 @@ function UsersInner() {
       return [u.fullName, u.nickname, u.studentId, u.email, u.classroom, u.uid]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(s));
-    }).sort((a, b) => {
-      const nameA = a.fullName || a.email || a.uid;
-      const nameB = b.fullName || b.email || b.uid;
-      if (sortMode === "classroom") {
-        return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
-          || nameA.localeCompare(nameB, "th", { numeric: true });
-      }
-      return nameA.localeCompare(nameB, "th", { numeric: true });
     });
-  }, [users, search, yearFilter, profileFilter, sortMode]);
+  }, [users, search, yearFilter, profileFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<UserStatus, number> = { student: 0, leader: 0, teacher: 0 };
+    for (const u of baseFiltered) {
+      counts[getUserStatus(u)]++;
+    }
+    return counts;
+  }, [baseFiltered]);
+
+  const filtered = useMemo(() => {
+    return baseFiltered
+      .filter((u) => (statusFilter ? getUserStatus(u) === statusFilter : true))
+      .sort((a, b) => {
+        const nameA = a.fullName || a.email || a.uid;
+        const nameB = b.fullName || b.email || b.uid;
+        if (sortMode === "classroom") {
+          return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
+            || nameA.localeCompare(nameB, "th", { numeric: true });
+        }
+        return nameA.localeCompare(nameB, "th", { numeric: true });
+      });
+  }, [baseFiltered, statusFilter, sortMode]);
 
   const changeRole = async (uid: string, role: Role) => {
     if (!me) return;
@@ -110,6 +126,19 @@ function UsersInner() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ");
     } finally { setBusy(null); }
+  };
+
+  const changeStatus = async (uid: string, status: UserStatus) => {
+    if (!me) return;
+    setBusy(uid);
+    try {
+      await setUserStatus(me.uid, uid, status);
+      toast.success("เปลี่ยนสถานะแล้ว");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const toggleTester = async (uid: string, current: boolean) => {
@@ -164,9 +193,24 @@ function UsersInner() {
     <main className="mx-auto max-w-4xl p-4">
       <Nav />
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h1 className="text-xl font-bold">
-          {subTab === "manage" ? `ผู้ใช้ทั้งหมด (${filtered.length})` : "ผลประเมินผู้ใช้"}
-        </h1>
+        <div>
+          <h1 className="text-xl font-bold">
+            {subTab === "manage" ? `ผู้ใช้ทั้งหมด (นักเรียน ${statusCounts.student} คน)` : "ผลประเมินผู้ใช้"}
+          </h1>
+          {subTab === "manage" && (
+            <div className="mt-1 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-sky-100 px-2.5 py-0.5 font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                นักเรียน: {statusCounts.student} คน
+              </span>
+              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                หัวหน้า: {statusCounts.leader} คน
+              </span>
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                ครู: {statusCounts.teacher} คน
+              </span>
+            </div>
+          )}
+        </div>
         {subTab === "manage" && (
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={handleExport}>
@@ -249,6 +293,17 @@ function UsersInner() {
               ))}
             </select>
             <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-11 rounded-lg border px-3"
+              aria-label="กรองตามสถานะ"
+            >
+              <option value="">ทุกสถานะ</option>
+              <option value="student">สถานะ: นักเรียน ({statusCounts.student})</option>
+              <option value="leader">สถานะ: หัวหน้า ({statusCounts.leader})</option>
+              <option value="teacher">สถานะ: ครู ({statusCounts.teacher})</option>
+            </select>
+            <select
               value={profileFilter}
               onChange={(e) => setProfileFilter(e.target.value as "all" | "incomplete")}
               className="h-11 rounded-lg border px-3"
@@ -267,6 +322,7 @@ function UsersInner() {
                 <th className="px-3 py-2">ห้อง</th>
                 <th className="px-3 py-2">ชั้นปี</th>
                 <th className="px-3 py-2">รหัส นร.</th>
+                <th className="px-3 py-2">สถานะ</th>
                 <th className="px-3 py-2">สิทธิ์</th>
                 <th className="px-3 py-2">Tester</th>
                 <th className="px-3 py-2">ซ่อม</th>
@@ -290,7 +346,7 @@ function UsersInner() {
                   <td className="px-3 py-2">
                     <select
                       value={u.year || ""}
-                      disabled={busy === u.uid || u.uid === me?.uid}
+                      disabled={busy === u.uid}
                       onChange={(e) => changeYear(u.uid, Number(e.target.value))}
                       className="h-8 rounded border px-2 text-xs"
                     >
@@ -301,6 +357,25 @@ function UsersInner() {
                     </select>
                   </td>
                   <td className="px-3 py-2">{u.studentId || "—"}</td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={getUserStatus(u)}
+                      disabled={busy === u.uid}
+                      onChange={(e) => changeStatus(u.uid, e.target.value as UserStatus)}
+                      className={`h-8 rounded border px-2 text-xs font-medium ${
+                        getUserStatus(u) === "student"
+                          ? "border-sky-300 bg-sky-50 text-sky-800 dark:bg-sky-950 dark:text-sky-300"
+                          : getUserStatus(u) === "leader"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                      }`}
+                      aria-label="สถานะ"
+                    >
+                      <option value="student">นักเรียน</option>
+                      <option value="leader">หัวหน้า</option>
+                      <option value="teacher">ครู</option>
+                    </select>
+                  </td>
                   <td className="px-3 py-2">
                     <select
                       value={u.role}

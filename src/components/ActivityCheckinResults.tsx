@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { exemptActivityAttendance, unexemptActivityAttendance } from "@/lib/actions";
 import { downloadXlsx, todayStamp, thaiDateTime } from "@/lib/exports";
 import type { ActivityDoc, ActivityCheckinDoc, ActivityExemptionDoc, UserDoc } from "@/lib/types";
+import { isStudentStatus } from "@/lib/profile";
 
 export function ActivityCheckinResults({
   activity,
@@ -33,9 +34,13 @@ export function ActivityCheckinResults({
       query(
         collection(db(), "users"),
         where("year", "==", activity.year),
-        where("role", "in", ["student", "admin_student"]),
       ),
-      (snap) => setStudents(snap.docs.map((d) => d.data() as UserDoc)),
+      (snap) =>
+        setStudents(
+          snap.docs
+            .map((d) => d.data() as UserDoc)
+            .filter((u) => u.year === activity.year && isStudentStatus(u)),
+        ),
     );
 
     const unsubCheckins = onSnapshot(

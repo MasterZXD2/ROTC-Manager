@@ -89,7 +89,7 @@ export async function validateBackup(value: unknown, projectId: string): Promise
       seen.add(record.id);
       if ("$timestamp" in record.data) throw new Error("รูปแบบเอกสารในไฟล์ไม่ถูกต้อง");
       if (name === "users") {
-        const user = z.object({ uid: z.literal(record.id), email: z.string().email(), role: z.enum(["student", "admin_student", "admin_teacher", "admin", "top_admin"]), year: z.number().int().min(0).max(5) }).safeParse(record.data);
+        const user = z.object({ uid: z.literal(record.id), email: z.string().email(), role: z.enum(["student", "admin_student", "admin_teacher", "admin", "top_admin"]), status: z.enum(["student", "leader", "teacher"]).optional(), year: z.number().int().min(0).max(5) }).safeParse(record.data);
         if (!user.success) throw new Error("ข้อมูลบัญชีผู้ใช้ในไฟล์ไม่ถูกต้อง");
       }
     }

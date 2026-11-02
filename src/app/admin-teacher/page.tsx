@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CheckinDoc } from "@/lib/types";
+import { getUserStatus, isStudentStatus, isStudentOrLeaderStatus } from "@/lib/profile";
+import type { UserStatus } from "@/lib/types";
 import { ExternalLink, KeyRound, LogOut, Trash2, Users, UserPlus, ListChecks, Pencil, Download, Calendar, Wrench } from "lucide-react";
 import Link from "next/link";
 import {
@@ -404,11 +406,15 @@ function UsersInYear({
   const [editing, setEditing] = useState<UserDoc | null>(null);
   const [search, setSearch] = useState("");
   const [yearFilter, setYearFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
   const [sortMode, setSortMode] = useState<"name" | "classroom">("name");
   const confirm = useConfirm();
   const isTopAdmin = callerRole === "top_admin";
 
   useEffect(() => {
+    // คำนึงถึงชั้นปีอย่างเคร่งครัด:
+    // - Admin ครู: ดึงเฉพาะผู้ใช้ในชั้นปีของตนเองเท่านั้น (ไม่ปนปี 1 หรือ ปี 3)
+    // - Top Admin: ดึงทุกชั้นปีและกรองตาม yearFilter ได้
     const q = isTopAdmin
       ? query(collection(db(), "users"))
       : query(collection(db(), "users"), where("year", "==", year));
@@ -424,25 +430,46 @@ function UsersInYear({
     return () => unsub();
   }, [isTopAdmin, year]);
 
-  const filtered = useMemo(() => {
+  // กรองตามชั้นปีและคำค้นหาก่อน เพื่อนำไปนับจำนวนแยกตามสถานะได้อย่างแม่นยำ
+  const yearAndSearchMatched = useMemo(() => {
     const s = search.trim().toLowerCase();
     return users.filter((u) => {
-      if (u.role !== "student") return false;
-      if (yearFilter && String(u.year) !== yearFilter) return false;
+      // บังคับชั้นปีเสมอ: ถ้าเป็นครู ต้องตรงกับ year ของครูเท่านั้น
+      if (!isTopAdmin) {
+        if (u.year !== year) return false;
+      } else if (yearFilter) {
+        if (String(u.year) !== yearFilter) return false;
+      }
+
       if (!s) return true;
-      return [u.fullName, u.nickname, u.studentId, u.classroom]
+      return [u.fullName, u.nickname, u.studentId, u.classroom, u.email]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(s));
-    }).sort((a, b) => {
-      const nameA = a.fullName || a.email || a.uid;
-      const nameB = b.fullName || b.email || b.uid;
-      if (sortMode === "classroom") {
-        return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
-          || nameA.localeCompare(nameB, "th", { numeric: true });
-      }
-      return nameA.localeCompare(nameB, "th", { numeric: true });
     });
-  }, [users, search, yearFilter, sortMode]);
+  }, [users, search, yearFilter, isTopAdmin, year]);
+
+  // นับจำนวนแยกตาม "สถานะ" (ไม่นับรวมทั้งหมดมั่วกัน)
+  const statusCounts = useMemo(() => {
+    const counts: Record<UserStatus, number> = { student: 0, leader: 0, teacher: 0 };
+    for (const u of yearAndSearchMatched) {
+      counts[getUserStatus(u)]++;
+    }
+    return counts;
+  }, [yearAndSearchMatched]);
+
+  const filtered = useMemo(() => {
+    return yearAndSearchMatched
+      .filter((u) => (statusFilter ? getUserStatus(u) === statusFilter : true))
+      .sort((a, b) => {
+        const nameA = a.fullName || a.email || a.uid;
+        const nameB = b.fullName || b.email || b.uid;
+        if (sortMode === "classroom") {
+          return (a.classroom || "").localeCompare(b.classroom || "", "th", { numeric: true })
+            || nameA.localeCompare(nameB, "th", { numeric: true });
+        }
+        return nameA.localeCompare(nameB, "th", { numeric: true });
+      });
+  }, [yearAndSearchMatched, statusFilter, sortMode]);
 
   const onDelete = async (uid: string, name: string) => {
     const ok = await confirm({
@@ -454,7 +481,7 @@ function UsersInYear({
     if (!ok) return;
     try {
       await deleteUserAndCheckins(callerUid, uid);
-      toast.success("ลบนักเรียนแล้ว");
+      toast.success("ลบข้อมูลแล้ว");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ");
     }
@@ -473,7 +500,7 @@ function UsersInYear({
     <>
       <div className="mb-3 flex flex-wrap gap-2">
         <Input
-          placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส นร."
+          placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส นร. / อีเมล"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
@@ -486,6 +513,17 @@ function UsersInYear({
         >
           <option value="name">เรียงตามลำดับตัวอักษร</option>
           <option value="classroom">เรียงตามห้อง</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-11 rounded-lg border bg-background px-3"
+          aria-label="กรองตามสถานะ"
+        >
+          <option value="">ทุกสถานะในชั้นปี</option>
+          <option value="student">สถานะ: นักเรียน ({statusCounts.student})</option>
+          <option value="leader">สถานะ: หัวหน้า ({statusCounts.leader})</option>
+          <option value="teacher">สถานะ: ครู ({statusCounts.teacher})</option>
         </select>
         <select
           value={yearFilter}
@@ -501,8 +539,21 @@ function UsersInYear({
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>จัดการนักเรียน ({filtered.length} คน)</CardTitle>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>จัดการนักเรียน (นักเรียน {statusCounts.student} คน)</CardTitle>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              <span className="rounded-full bg-sky-100 px-2.5 py-0.5 font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                นักเรียน: {statusCounts.student} คน
+              </span>
+              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                หัวหน้า: {statusCounts.leader} คน
+              </span>
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                ครู: {statusCounts.teacher} คน
+              </span>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <table className="w-full text-sm">
@@ -512,23 +563,66 @@ function UsersInYear({
                 <th className="px-3 py-2">ห้อง</th>
                 <th className="px-3 py-2">ปี</th>
                 <th className="px-3 py-2">รหัส นร.</th>
+                <th className="px-3 py-2">สถานะ</th>
+                <th className="px-3 py-2">สิทธิ์</th>
                 <th className="px-3 py-2">ซ่อม</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((u) => {
-                const canManage = isTopAdmin || u.year === year;
+                const status = getUserStatus(u);
+                const isStudentOrLeader = isStudentOrLeaderStatus(u);
+                const canManage = isTopAdmin || (u.year === year && isStudentOrLeader);
+                const canDelete = isTopAdmin
+                  ? u.uid !== callerUid && u.role !== "top_admin"
+                  : canManage && u.role !== "top_admin" && u.role !== "admin_teacher" && u.role !== "admin";
+
                 return (
                   <tr key={u.uid} className="border-b last:border-0">
                     <td className="px-3 py-2">
-                      {u.fullName} <span className="text-muted-foreground">({u.nickname})</span>
+                      <div className="font-medium">{u.fullName || u.email}</div>
+                      {u.nickname && <div className="text-xs text-muted-foreground">({u.nickname})</div>}
                     </td>
-                    <td className="px-3 py-2">{u.classroom}</td>
-                    <td className="px-3 py-2">{u.year}</td>
-                    <td className="px-3 py-2">{u.studentId}</td>
+                    <td className="px-3 py-2">{u.classroom || "—"}</td>
+                    <td className="px-3 py-2">{u.year || "—"}</td>
+                    <td className="px-3 py-2">{u.studentId || "—"}</td>
                     <td className="px-3 py-2">
-                      {canManage ? (
+                      {status === "student" ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                          นักเรียน
+                        </span>
+                      ) : status === "leader" ? (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                          หัวหน้า
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                          ครู
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {u.role === "top_admin" ? (
+                        <span className="inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                          Top Admin
+                        </span>
+                      ) : u.role === "admin_teacher" || u.role === "admin" ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                          Admin (ครู)
+                        </span>
+                      ) : u.role === "admin_student" ? (
+                        <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                          Admin (นักเรียน)
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          นักเรียน
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {isStudentOrLeader && canManage ? (
                         <Button
                           variant={u.isTrafficRepair ? "default" : "outline"}
                           size="sm"
@@ -544,17 +638,17 @@ function UsersInYear({
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? (
-                        <>
-                          <Button variant="ghost" size="icon" onClick={() => setEditing(u)} title="แก้ไข">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => onDelete(u.uid, u.fullName)} title="ลบ">
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </>
+                      {canManage && isStudentOrLeader ? (
+                        <Button variant="ghost" size="icon" onClick={() => setEditing(u)} title="แก้ไข">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                      {canDelete ? (
+                        <Button variant="ghost" size="icon" onClick={() => onDelete(u.uid, u.fullName || u.email)} title="ลบ">
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
                       ) : (
-                        <span className="text-xs text-muted-foreground">ดูอย่างเดียว</span>
+                        !canManage && <span className="text-xs text-muted-foreground">ดูอย่างเดียว</span>
                       )}
                     </td>
                   </tr>

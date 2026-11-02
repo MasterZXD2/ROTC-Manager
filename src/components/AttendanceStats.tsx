@@ -75,9 +75,16 @@ export function AttendanceStats({ year, callerUid }: Props) {
   useEffect(() => {
     const base = collection(db(), "dutyLogs");
     const q = year === null
-      ? query(base, orderBy("checkedAt", "desc"), limit(MAX_HISTORY))
-      : query(base, where("year", "==", year), orderBy("checkedAt", "desc"), limit(MAX_HISTORY));
-    return onSnapshot(q, (s) => setDutyLogs(s.docs.map((d) => d.data() as DutyLogDoc)));
+      ? query(base)
+      : query(base, where("year", "==", year));
+    return onSnapshot(q, (s) =>
+      setDutyLogs(
+        s.docs
+          .map((d) => d.data() as DutyLogDoc)
+          .sort((a, b) => (b.checkedAt || 0) - (a.checkedAt || 0))
+          .slice(0, MAX_HISTORY),
+      ),
+    );
   }, [year]);
 
   const earliestStart = useMemo(() => {
@@ -88,8 +95,8 @@ export function AttendanceStats({ year, callerUid }: Props) {
   useEffect(() => {
     const base = collection(db(), "checkins");
     const q = year === null
-      ? query(base, where("timestamp", ">=", earliestStart))
-      : query(base, where("year", "==", year), where("timestamp", ">=", earliestStart));
+      ? query(base, where("timestamp", ">=", earliestStart), orderBy("timestamp", "desc"))
+      : query(base, where("year", "==", year), where("timestamp", ">=", earliestStart), orderBy("timestamp", "desc"));
     return onSnapshot(q, (s) => setCheckins(s.docs.map((d) => d.data() as CheckinDoc)));
   }, [year, earliestStart]);
 

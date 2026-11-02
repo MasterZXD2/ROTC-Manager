@@ -17,6 +17,7 @@ import type {
   YearConfigDoc,
 } from "@/lib/types";
 import { DEFAULT_PASSING_PERCENT } from "@/lib/types";
+import { isStudentStatus } from "@/lib/profile";
 import type { EditorColumn } from "@/lib/editor-bus";
 import { useReviewFlow } from "@/components/ReviewBeforePrompt";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,7 @@ export function UserEvaluationTab({ callerUid, users, yearScope = null }: Props)
 
   const rows = useMemo(() => {
     const sourceUsers = (users ?? loadedUsers)
-      .filter((u) => u.role === "student" || u.role === "admin_student")
+      .filter((u) => isStudentStatus(u))
       .filter((u) => (yearScope ? u.year === yearScope : true));
 
     const tasksByYear = new Map<number, TaskDoc[]>();

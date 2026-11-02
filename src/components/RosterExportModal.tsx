@@ -1,14 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { X, Download, FileSpreadsheet } from "lucide-react";
 import { downloadXlsx, todayStamp, buildSignInTemplateSheet, type Cell } from "@/lib/exports";
 import { toast } from "sonner";
-import type { UserDoc } from "@/lib/types";
+import type { UserDoc, UserStatus } from "@/lib/types";
+import { getUserStatus, USER_STATUS_LABEL } from "@/lib/profile";
+
+const ROLE_LABEL: Record<string, string> = {
+  student: "นักเรียน",
+  admin_student: "Admin (นักเรียน)",
+  admin_teacher: "Admin (ครู)",
+  admin: "Admin (ครู)",
+  top_admin: "Top Admin",
+};
+
+const STATUS_OPTIONS: UserStatus[] = ["student", "leader", "teacher"];
 
 interface ColumnDef {
   key: string;
@@ -19,13 +30,15 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: "no",        label: "ลำดับ",        get: () => "",            defaultOn: true,  width: 6 },
-  { key: "studentId", label: "เลข นร.",       get: (u) => u.studentId,  defaultOn: true,  width: 12 },
-  { key: "fullName",  label: "ชื่อ (นศท.)",   get: (u) => u.fullName,   defaultOn: true,  width: 28 },
-  { key: "nickname",  label: "ชื่อเล่น",       get: (u) => u.nickname,   defaultOn: false, width: 12 },
-  { key: "classroom", label: "ห้อง/ชั้น",      get: (u) => u.classroom,  defaultOn: true,  width: 10 },
-  { key: "year",      label: "ชั้นปี นศท.",    get: (u) => u.year,       defaultOn: false, width: 8 },
-  { key: "email",     label: "อีเมล",          get: (u) => u.email,      defaultOn: false, width: 28 },
+  { key: "no",        label: "ลำดับ",        get: () => "",                                    defaultOn: true,  width: 6 },
+  { key: "studentId", label: "เลข นร.",       get: (u) => u.studentId,                          defaultOn: true,  width: 12 },
+  { key: "fullName",  label: "ชื่อ (นศท.)",   get: (u) => u.fullName,                           defaultOn: true,  width: 28 },
+  { key: "nickname",  label: "ชื่อเล่น",       get: (u) => u.nickname,                           defaultOn: false, width: 12 },
+  { key: "classroom", label: "ห้อง/ชั้น",      get: (u) => u.classroom,                          defaultOn: true,  width: 10 },
+  { key: "year",      label: "ชั้นปี นศท.",    get: (u) => u.year,                               defaultOn: false, width: 8 },
+  { key: "status",    label: "สถานะ",          get: (u) => USER_STATUS_LABEL[getUserStatus(u)], defaultOn: true,  width: 12 },
+  { key: "role",      label: "สิทธิ์",          get: (u) => ROLE_LABEL[u.role] ?? u.role,         defaultOn: false, width: 16 },
+  { key: "email",     label: "อีเมล",          get: (u) => u.email,                              defaultOn: false, width: 28 },
 ];
 
 interface Props {
@@ -35,7 +48,9 @@ interface Props {
 }
 
 export function RosterExportModal({ year, open, onClose }: Props) {
-  const [students, setStudents] = useState<UserDoc[]>([]);
+  const [yearUsers, setYearUsers] = useState<UserDoc[]>([]);
+  // ค่าเริ่มต้นส่งออกเฉพาะสถานะ "นักเรียน"
+  const [statusPicked, setStatusPicked] = useState<Set<UserStatus>>(new Set(["student"]));
   const [picked, setPicked] = useState<Set<string>>(
     new Set(COLUMNS.filter((c) => c.defaultOn).map((c) => c.key)),
   );
@@ -47,15 +62,35 @@ export function RosterExportModal({ year, open, onClose }: Props) {
     const q = query(
       collection(db(), "users"),
       where("year", "==", year),
-      orderBy("fullName"),
     );
     return onSnapshot(q, (s) => {
-      const users = s.docs.map((d) => d.data() as UserDoc);
-      // กรองเฉพาะ student และ admin_student
-      const filtered = users.filter((u) => u.role === "student" || u.role === "admin_student");
-      setStudents(filtered);
+      const users = s.docs
+        .map((d) => d.data() as UserDoc)
+        .filter((u) => u.year === year)
+        .sort((a, b) => (a.fullName || a.email || a.uid).localeCompare(b.fullName || b.email || b.uid, "th"));
+      setYearUsers(users);
     });
   }, [year, open]);
+
+  const countsByStatus = useMemo(() => {
+    const counts: Record<UserStatus, number> = { student: 0, leader: 0, teacher: 0 };
+    for (const u of yearUsers) {
+      counts[getUserStatus(u)]++;
+    }
+    return counts;
+  }, [yearUsers]);
+
+  const students = useMemo(
+    () => yearUsers.filter((u) => statusPicked.has(getUserStatus(u))),
+    [yearUsers, statusPicked],
+  );
+
+  const toggleStatus = (st: UserStatus) => {
+    const next = new Set(statusPicked);
+    if (next.has(st)) next.delete(st);
+    else next.add(st);
+    setStatusPicked(next);
+  };
 
   const toggle = (key: string) => {
     const next = new Set(picked);
@@ -71,12 +106,16 @@ export function RosterExportModal({ year, open, onClose }: Props) {
   );
 
   const exportNow = async () => {
+    if (statusPicked.size === 0) {
+      toast.warning("เลือกอย่างน้อย 1 สถานะ");
+      return;
+    }
     if (cols.length === 0 && blankCols.length === 0) {
       toast.warning("เลือกอย่างน้อย 1 คอลัมน์");
       return;
     }
     if (students.length === 0) {
-      toast.warning("ยังไม่มีนักเรียนในชั้นปีนี้");
+      toast.warning("ไม่มีรายชื่อตามสถานะที่เลือกในชั้นปีนี้");
       return;
     }
     const headers = [...cols.map((c) => c.label), ...blankCols];
@@ -111,8 +150,31 @@ export function RosterExportModal({ year, open, onClose }: Props) {
           </Button>
         </div>
 
-        <p className="mb-2 text-sm text-muted-foreground">
-          เลือกคอลัมน์ที่ต้องการ ({students.length} คน)
+        <p className="mb-1.5 text-sm font-medium">
+          เลือกสถานะที่ต้องการส่งออก (รวม {students.length} คน)
+        </p>
+        <Card className="mb-3">
+          <CardContent className="p-3">
+            <div className="flex flex-wrap gap-3">
+              {STATUS_OPTIONS.map((st) => (
+                <label key={st} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input
+                    type="checkbox"
+                    checked={statusPicked.has(st)}
+                    onChange={() => toggleStatus(st)}
+                    className="h-4 w-4"
+                  />
+                  <span>
+                    {USER_STATUS_LABEL[st]} ({countsByStatus[st]} คน)
+                  </span>
+                </label>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <p className="mb-1.5 text-sm text-muted-foreground">
+          เลือกคอลัมน์ที่ต้องการ
         </p>
         <Card className="mb-3">
           <CardContent className="p-3">
@@ -163,7 +225,7 @@ export function RosterExportModal({ year, open, onClose }: Props) {
         </label>
 
         <Button className="w-full" onClick={exportNow}>
-          <Download className="mr-2 h-4 w-4" />ดาวน์โหลด Excel (.xlsx)
+          <Download className="mr-2 h-4 w-4" />ดาวน์โหลด Excel ({students.length} คน)
         </Button>
       </div>
     </div>

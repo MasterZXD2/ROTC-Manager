@@ -5,10 +5,17 @@ export type Role =
   | "admin" // legacy — treated as admin_teacher
   | "top_admin";
 
+/** สถานะบุคคล — แยกจากสิทธิ์ (role)
+ *  student = นักเรียน, leader = หัวหน้า, teacher = ครู
+ *  เปลี่ยนได้โดย Top Admin เท่านั้น */
+export type UserStatus = "student" | "leader" | "teacher";
+
 export interface UserDoc {
   uid: string;
   email: string;
   role: Role;
+  /** ถ้าไม่มีค่า จะคำนวณจาก role (ดู getUserStatus ใน lib/profile.ts) */
+  status?: UserStatus;
   fullName: string;
   nickname: string;
   classroom: string;
